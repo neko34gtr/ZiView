@@ -1,0 +1,15 @@
+﻿<Application x:Class="ZiView.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ZiView"
+             Startup="Application_Startup"
+             Exit="Application_Exit">
+    <Application.Resources>
+        <local:HalfLayoutConverter x:Key="HalfLayoutConverter"/>
+
+        <Style TargetType="Window">
+            <Setter Property="Background" Value="#000000"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+        </Style>
+    </Application.Resources>
+</Application>
