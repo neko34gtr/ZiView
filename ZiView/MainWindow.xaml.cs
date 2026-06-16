@@ -254,7 +254,7 @@ namespace ZiView
             CheckLens.IsChecked = _config.EnableLensCorrection;
             LensSlider.Value = _config.LensCorrectionAmount;
 
-            ReticleOverlay.Visibility = _config.ShowReticle ? Visibility.Visible : Visibility.Collapsed;
+            ReticleOverlay.Visibility = !_config.ShowReticle ? Visibility.Collapsed : Visibility.Visible;
             if (LensShader != null)
             {
                 LensShader.DistortionAmount = _config.EnableLensCorrection ? _config.LensCorrectionAmount : 0.0;
@@ -800,6 +800,19 @@ namespace ZiView
             _config.EnableLensCorrection = CheckLens.IsChecked ?? false;
             ApplyConfigToUi();
             SaveConfig();
+        }
+
+        //「レンズ補正（ディストーション補正）を行う際の『光学中心（光軸）』を視覚的に合わせるため」のガイドライン表示切替
+        private void OnReticleSettingChanged(object sender, RoutedEventArgs e)
+        {
+            if (CheckReticle.IsChecked == true)
+            {
+                ReticleOverlay.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ReticleOverlay.Visibility = Visibility.Collapsed;
+            }
         }
 
         private void OnLensSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)

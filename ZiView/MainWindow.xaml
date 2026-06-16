@@ -93,6 +93,7 @@
                 <TextBlock Text="ZiView SETTINGS" FontSize="16" FontWeight="Bold" Foreground="#00FFFF" Margin="0,0,0,25"/>
                 <CheckBox x:Name="CheckSpread" Content="Spread View (右開き)" IsChecked="False" Click="OnSettingChanged"/>
                 <CheckBox x:Name="CheckAutoDetect" Content="Auto Page Order" IsChecked="False" Click="OnSettingChanged"/>
+                <CheckBox x:Name="CheckReticle" Content="Show Reticle" IsChecked="False" Click="OnReticleSettingChanged"/>
                 <CheckBox x:Name="CheckPrefetch" Content="AI Prefetch" IsChecked="True"/>
 
                 <Separator Background="#222" Margin="0,15"/>
