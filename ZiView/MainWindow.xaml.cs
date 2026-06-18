@@ -754,6 +754,21 @@ namespace ZiView
                     ToggleFullscreen();
                     e.Handled = true;
                     break;
+                // --- (Shift + 上下キーによるズーム) ---
+                case Key.Up:
+                    if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+                    {
+                        ZoomAtCursor(0.1);
+                        e.Handled = true;
+                    }
+                    break;
+                case Key.Down:
+                    if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+                    {
+                        ZoomAtCursor(-0.1);
+                        e.Handled = true;
+                    }
+                    break;
                 case Key.R:
                     _config.ShowReticle = !_config.ShowReticle;
                     ApplyConfigToUi();
@@ -857,6 +872,28 @@ namespace ZiView
             menu.PlacementTarget = (System.Windows.Controls.Button)sender;
             menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
             menu.IsOpen = true;
+        }
+        private void ZoomAtCursor(double delta)
+        {
+            // マウスの現在位置をコンテナ基準で取得
+            System.Windows.Point mousePos = Mouse.GetPosition(ImageContainer);
+
+            // 現在の倍率を取得
+            double scale = ImgScale.ScaleX;
+            // 0.1倍〜5.0倍の範囲で制限
+            double newScale = Math.Max(0.1, Math.Min(5.0, scale + delta));
+
+            // 拡大比率
+            double ratio = newScale / scale;
+
+            // マウス位置を中心にスケーリングするためのオフセット計算
+            // これにより、ズーム時にカーソル位置がずれません
+            ImgTranslate.X = (ImgTranslate.X - mousePos.X) * ratio + mousePos.X;
+            ImgTranslate.Y = (ImgTranslate.Y - mousePos.Y) * ratio + mousePos.Y;
+
+            // 倍率の適用
+            ImgScale.ScaleX = newScale;
+            ImgScale.ScaleY = newScale;
         }
         private void ShowContextMenu()
         {
