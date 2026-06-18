@@ -160,9 +160,10 @@ namespace ZiView
                 _config.WindowTop = this.Top;
                 _config.WindowWidth = this.ActualWidth;
                 _config.WindowHeight = this.ActualHeight;
-                _config.CheckSpread = CheckSpread.IsChecked ?? false;
+                _config.CheckSpread = CheckSpread.IsChecked ?? true;
                 _config.CheckAutoDetect = CheckAutoDetect.IsChecked ?? false;
                 _config.CheckPrefetch = CheckPrefetch.IsChecked ?? true;
+                _config.ShowReticle = CheckReticle.IsChecked ?? true;
                 _config.SplitSliderValue = SplitSlider.Value;
                 _config.LastSourcePath = _currentSourcePath ?? string.Empty;
 
