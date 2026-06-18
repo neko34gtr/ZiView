@@ -254,7 +254,9 @@ namespace ZiView
             CheckLens.IsChecked = _config.EnableLensCorrection;
             LensSlider.Value = _config.LensCorrectionAmount;
 
-            ReticleOverlay.Visibility = !_config.ShowReticle ? Visibility.Collapsed : Visibility.Visible;
+            // 設定値(ShowReticle)がtrueならVisible、falseならCollapsedにする
+            CheckReticle.IsChecked = _config.ShowReticle;
+            ReticleOverlay.Visibility = _config.ShowReticle ? Visibility.Visible : Visibility.Collapsed;
             if (LensShader != null)
             {
                 LensShader.DistortionAmount = _config.EnableLensCorrection ? _config.LensCorrectionAmount : 0.0;
