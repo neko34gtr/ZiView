@@ -37,6 +37,7 @@ namespace ZiView
         public double WindowWidth { get; set; } = 1200;
         public double WindowHeight { get; set; } = 800;
         public bool CheckSpread { get; set; } = false;
+        public bool CheckAutoDetectOrder { get; set; } = false; // プロパティ名修正等の不整合防止
         public bool CheckAutoDetect { get; set; } = false;
         public bool CheckPrefetch { get; set; } = false;
         public double SplitSliderValue { get; set; } = 100;
@@ -47,7 +48,7 @@ namespace ZiView
         public bool EnableLensCorrection { get; set; } = false;
         public double LensCorrectionAmount { get; set; } = 0.40;
 
-        // --- 追加: 背景色の設定を保存するプロパティ（デフォルト: 真の黒） ---
+        // 背景色の設定を保存するプロパティ（デフォルト: 真の黒）
         public string BackgroundColor { get; set; } = "#000000";
     }
 
@@ -81,12 +82,17 @@ namespace ZiView
         private bool _isDragging;
         private AppConfig _config = new();
         private CancellationTokenSource? _cts;
-        private CustomColorPicker? _colorPicker;
 
         // 無限ループイベントを抑止するためのフラグ
         private bool _isUpdatingPageSliderInternal = false;
 
-        public MainWindow(string[]? args = null) // 引数を受け取れるように変更)
+        // カラーピッカー用状態変数
+        private double _currentHue = 0.0;
+        private double _currentSaturation = 1.0;
+        private double _currentValue = 1.0;
+        private string _selectedHexColor = "#000000";
+
+        public MainWindow(string[]? args = null)
         {
             InitializeComponent();
             InitLog();
@@ -94,20 +100,6 @@ namespace ZiView
 
             LoadConfig();
 
-            // カスタムカラーピッカーの初期化（適用時のコールバック処理をラムダ式で指定）
-            _colorPicker = new CustomColorPicker(
-                ColorPickerSvCanvas,
-                SliderHue,
-                PreviewColorBox,
-                (hexColor) =>
-                {
-                    _config.BackgroundColor = hexColor;
-                    ApplyConfigToUi();
-                    SaveConfig();
-                }
-            );
-
-            // コマンドライン引数が存在する場合のみ、初期パスとして採用
             if (args != null && args.Length > 0)
             {
                 _currentSourcePath = args[0];
@@ -117,7 +109,7 @@ namespace ZiView
             {
                 IntPtr hwnd = new WindowInteropHelper(this).Handle;
                 int darkMode = 1;
-                DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
+                DwmSetWindowAttribute(hwnd, 20, ref darkMode, sizeof(int));
             };
 
             _monitorTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -128,11 +120,12 @@ namespace ZiView
             {
                 InitializeAi();
                 ApplyConfigToUi();
-                // 設定ファイルまたは引数でセットされたパスがあれば一度だけ読み込む
                 if (!string.IsNullOrEmpty(_currentSourcePath))
                 {
                     LoadSource(_currentSourcePath);
                 }
+                UpdateColorPickerBrush();
+                UpdatePreview();
             };
             SetupEvents();
         }
@@ -180,9 +173,10 @@ namespace ZiView
                 _config.CheckSpread = CheckSpread.IsChecked ?? true;
                 _config.CheckAutoDetect = CheckAutoDetect.IsChecked ?? false;
                 _config.CheckPrefetch = CheckPrefetch.IsChecked ?? true;
-                _config.ShowReticle = ReticleOverlay.Visibility == Visibility.Visible;
+                _config.ShowReticle = CheckReticle.IsChecked ?? true;
                 _config.SplitSliderValue = SplitSlider.Value;
                 _config.LastSourcePath = _currentSourcePath ?? string.Empty;
+                _config.BackgroundColor = _selectedHexColor;
 
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 string json = JsonSerializer.Serialize(_config, options);
@@ -199,7 +193,6 @@ namespace ZiView
             _currentCombinedOriginal?.Dispose();
             _currentCombinedUpscaled?.Dispose();
 
-            // 一時展開フォルダのクリーニング
             try
             {
                 if (Directory.Exists(_tempExtractDir))
@@ -272,7 +265,6 @@ namespace ZiView
             CheckLens.IsChecked = _config.EnableLensCorrection;
             LensSlider.Value = _config.LensCorrectionAmount;
 
-            // 設定値(ShowReticle)がtrueならVisible、falseならCollapsedにする
             CheckReticle.IsChecked = _config.ShowReticle;
             ReticleOverlay.Visibility = _config.ShowReticle ? Visibility.Visible : Visibility.Collapsed;
             if (LensShader != null)
@@ -280,7 +272,6 @@ namespace ZiView
                 LensShader.DistortionAmount = _config.EnableLensCorrection ? _config.LensCorrectionAmount : 0.0;
             }
 
-            // 背景色の適用処理（例外・Null対策済みの堅牢なコード）
             try
             {
                 var obj = new BrushConverter().ConvertFromString(_config.BackgroundColor);
@@ -305,7 +296,6 @@ namespace ZiView
                 if (files?.Length > 0) LoadSource(files[0]);
             };
 
-            // ページスライダー変更時のイベント処理
             PageSlider.ValueChanged += (s, e) =>
             {
                 if (_isUpdatingPageSliderInternal) return;
@@ -372,7 +362,6 @@ namespace ZiView
 
         }
 
-        // App.xaml.cs から呼び出される互換用ブリッジメソッド
         public void LoadImage(string path)
         {
             LoadSource(path);
@@ -408,7 +397,6 @@ namespace ZiView
                 Mat? pLeft = (isSpread && index + 1 < _imageList.Count) ? LoadMat(_imageList[index + 1]) : null;
                 _currentCombinedOriginal = CombineMats(pRight, pLeft);
 
-                // テキスト表示を正確に更新
                 PageText.Text = isSpread ? $"P.{index + 2}-{index + 1} / {_imageList.Count}" : $"P.{index + 1} / {_imageList.Count}";
 
                 if ((int)PageSlider.Value != index)
@@ -603,8 +591,8 @@ namespace ZiView
                 {
                     var v = idx[y, x];
                     data[0 * w * h + y * w + x] = v.Item0 / 255f;
-                    data[0 * w * h + y * w + x] = v.Item1 / 255f;
-                    data[0 * w * h + y * w + x] = v.Item2 / 255f;
+                    data[1 * w * h + y * w + x] = v.Item1 / 255f;
+                    data[2 * w * h + y * w + x] = v.Item2 / 255f;
                 }
             }
 
@@ -728,12 +716,10 @@ namespace ZiView
         {
             if (MainImage.Source == null) return;
 
-            // Shiftキーなしでページめくり（最優先操作）
             if (Keyboard.Modifiers != ModifierKeys.Shift)
             {
                 MovePage(e.Delta > 0 ? -1 : 1);
             }
-            // Shiftキー押下時は拡大縮小
             else
             {
                 System.Windows.Point mousePos = e.GetPosition(ImageBorder);
@@ -751,6 +737,127 @@ namespace ZiView
         }
         #endregion
 
+        #region カラーピッカー関連のHSV演算・プレビュー制御
+
+        private void OnSvCanvas_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            UpdateHsvFromMouse(e.GetPosition(ColorPickerSvCanvas));
+        }
+
+        private void OnSvCanvas_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (e.LeftButton == MouseButtonState.Pressed)
+            {
+                UpdateHsvFromMouse(e.GetPosition(ColorPickerSvCanvas));
+            }
+        }
+
+        private void OnHueSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            _currentHue = SliderHue.Value;
+            UpdateColorPickerBrush();
+            UpdatePreview();
+        }
+
+        private void UpdateHsvFromMouse(System.Windows.Point p)
+        {
+            double x = Math.Clamp(p.X, 0, ColorPickerSvCanvas.ActualWidth);
+            double y = Math.Clamp(p.Y, 0, ColorPickerSvCanvas.ActualHeight);
+
+            _currentSaturation = x / ColorPickerSvCanvas.ActualWidth;
+            _currentValue = 1.0 - (y / ColorPickerSvCanvas.ActualHeight);
+
+            UpdatePreview();
+        }
+
+        private void UpdateColorPickerBrush()
+        {
+            // SV Canvasの背景に Hue に対応する横方向グラデーション（黒～純色～白）を設定
+            var gradientBrush = new LinearGradientBrush
+            {
+                StartPoint = new System.Windows.Point(0, 0),
+                EndPoint = new System.Windows.Point(1, 0)
+            };
+
+            System.Windows.Media.Color pureColor = HsvToRgb(_currentHue, 1.0, 1.0);
+            gradientBrush.GradientStops.Add(new GradientStop(Colors.White, 0.0));
+            gradientBrush.GradientStops.Add(new GradientStop(pureColor, 1.0));
+
+            var verticalBrush = new DrawingBrush
+            {
+                Stretch = Stretch.Fill,
+                Drawing = new GeometryDrawing
+                {
+                    Geometry = new RectangleGeometry(new System.Windows.Rect(0, 0, 1, 1)),
+                    Brush = gradientBrush
+                }
+            };
+
+            // 上下が黒から透明のレイヤーを重ねてグラデーションを構築
+            var blackToTransparent = new LinearGradientBrush
+            {
+                StartPoint = new System.Windows.Point(0, 1),
+                EndPoint = new System.Windows.Point(0, 0)
+            };
+            blackToTransparent.GradientStops.Add(new GradientStop(Colors.Black, 0.0));
+            blackToTransparent.GradientStops.Add(new GradientStop(Colors.Transparent, 1.0));
+
+            var group = new DrawingGroup();
+            group.Children.Add(new ImageDrawing(null, new System.Windows.Rect(0, 0, 1, 1))); // ベース
+            group.Children.Add(new GeometryDrawing(gradientBrush, null, new RectangleGeometry(new System.Windows.Rect(0, 0, 1, 1))));
+            group.Children.Add(new GeometryDrawing(blackToTransparent, null, new RectangleGeometry(new System.Windows.Rect(0, 0, 1, 1))));
+
+            ColorPickerSvCanvas.Background = new DrawingBrush(group);
+        }
+
+        private void UpdatePreview()
+        {
+            System.Windows.Media.Color rgb = HsvToRgb(_currentHue, _currentSaturation, _currentValue);
+            _selectedHexColor = $"#{rgb.R:X2}{rgb.G:X2}{rgb.B:X2}";
+
+            PreviewColorBox.Fill = new SolidColorBrush(rgb);
+            HsvValueText.Text = $"H: {(int)_currentHue}°, S: {(int)(_currentSaturation * 100)}%, V: {(int)(_currentValue * 100)}%";
+        }
+
+        private System.Windows.Media.Color HsvToRgb(double h, double s, double v)
+        {
+            double c = v * s;
+            double x = c * (1.0 - Math.Abs((h / 60.0) % 2.0 - 1.0));
+            double m = v - c;
+
+            double r = 0, g = 0, b = 0;
+
+            if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+            else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
+            else if (h >= 120 && h < 180) { r = 0; g = c; b = x; }
+            else if (h >= 180 && h < 240) { r = 0; g = x; b = c; }
+            else if (h >= 240 && h < 300) { r = x; g = 0; b = c; }
+            else if (h >= 300 && h < 360) { r = c; g = 0; b = x; }
+
+            return System.Windows.Media.Color.FromRgb(
+                (byte)Math.Clamp((r + m) * 255, 0, 255),
+                (byte)Math.Clamp((g + m) * 255, 0, 255),
+                (byte)Math.Clamp((b + m) * 255, 0, 255)
+            );
+        }
+
+        private void OnApplyCustomColorClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var brush = new SolidColorBrush(HsvToRgb(_currentHue, _currentSaturation, _currentValue));
+                RootGrid.Background = brush;
+                SaveConfig();
+                ShowNotification($"背景色を変更: {_selectedHexColor}");
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"Custom Color Apply Error: {ex.Message}");
+            }
+        }
+
+        #endregion
+
         #region 各種イベント・ショートカット・アシスト制御
 
         protected override void OnPreviewKeyDown(KeyEventArgs e)
@@ -762,14 +869,12 @@ namespace ZiView
                 case Key.Space:
                     if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
                     {
-                        // Shift+Space: 見開き設定に関わらず、強制的に1ページずつ進める
                         int next = (int)PageSlider.Value + 1;
                         if (next > PageSlider.Maximum) LoadNextArchive(1);
                         else DisplayPage(next);
                     }
                     else
                     {
-                        // 通常Space: MovePageメソッド経由（見開きなら2ページ飛び）
                         MovePage(1);
                     }
                     e.Handled = true;
@@ -788,7 +893,6 @@ namespace ZiView
                     ToggleFullscreen();
                     e.Handled = true;
                     break;
-                // --- (Shift + 上下キーによるズーム) ---
                 case Key.Up:
                     if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
                     {
@@ -888,7 +992,6 @@ namespace ZiView
         private void MenuButton_Click(object sender, RoutedEventArgs e)
         {
             var menu = new System.Windows.Controls.ContextMenu();
-
             var itemFullscreen = new System.Windows.Controls.MenuItem { Header = "全画面表示の切り替え" };
             itemFullscreen.Click += (s, ev) => ToggleFullscreen();
             menu.Items.Add(itemFullscreen);
@@ -916,11 +1019,6 @@ namespace ZiView
 
             ImgScale.ScaleX = newScale;
             ImgScale.ScaleY = newScale;
-        }
-
-        private void OnApplyCustomColorClick(object sender, RoutedEventArgs e)
-        {
-            _colorPicker?.ApplyColor();
         }
 
         private void ShowContextMenu()
@@ -989,6 +1087,7 @@ namespace ZiView
                 NotificationBadge.Visibility = Visibility.Collapsed;
             }
         }
+
         #endregion
     }
 

@@ -9,7 +9,7 @@
         WindowStartupLocation="Manual">
 
     <Window.Resources>
-        <local:HalfLayoutConverter x:Key="HalfLayoutConverter"/>
+        <local:HalfLayoutConverter x:Key="LayoutConverter"/>
 
         <Style x:Key="LineStyle" TargetType="Line">
             <Setter Property="Stroke" Value="#4400FF00"/>
@@ -18,13 +18,58 @@
         </Style>
 
         <Style TargetType="Slider">
-            <Setter Property="Background" Value="#1A1A1A"/>
+            <Setter Property="Background" Value="#333333"/>
             <Setter Property="Foreground" Value="#00FFFF"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="24">
+                            <Border Background="#222222" BorderBrush="#333333" BorderThickness="1" 
+                                    Height="6" VerticalAlignment="Center" CornerRadius="3"/>
+                            <Track Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Style="{x:Null}" Template="{x:Null}" Background="Transparent"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Style="{x:Null}" Template="{x:Null}" Background="Transparent"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="16" Height="16" Background="#00FFFF" BorderBrush="#00FFFF">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="1"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="#DDD"/>
             <Setter Property="Margin" Value="0,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Grid Width="16" Height="16" Margin="0,0,8,0">
+                                <Rectangle Fill="#1A1A1A" Stroke="#00FF00" StrokeThickness="1"/>
+                                <Path x:Name="CheckMark" Data="M3,8 L7,12 L13,4" Stroke="#00FF00" StrokeThickness="2" Visibility="Collapsed"/>
+                            </Grid>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
 
@@ -67,13 +112,13 @@
         <Canvas x:Name="ReticleOverlay" IsHitTestVisible="False" Visibility="Collapsed">
             <Line Style="{StaticResource LineStyle}"
                   X1="0" 
-                  Y1="{Binding ActualHeight, ElementName=RootGrid, Converter={StaticResource HalfLayoutConverter}}" 
+                  Y1="{Binding ActualHeight, ElementName=RootGrid, Converter={StaticResource LayoutConverter}}" 
                   X2="{Binding ActualWidth, ElementName=RootGrid}" 
-                  Y2="{Binding ActualHeight, ElementName=RootGrid, Converter={StaticResource HalfLayoutConverter}}"/>
+                  Y2="{Binding ActualHeight, ElementName=RootGrid, Converter={StaticResource LayoutConverter}}"/>
             <Line Style="{StaticResource LineStyle}"
-                  X1="{Binding ActualWidth, ElementName=RootGrid, Converter={StaticResource HalfLayoutConverter}}" 
+                  X1="{Binding ActualWidth, ElementName=RootGrid, Converter={StaticResource LayoutConverter}}" 
                   Y1="0" 
-                  X2="{Binding ActualWidth, ElementName=RootGrid, Converter={StaticResource HalfLayoutConverter}}" 
+                  X2="{Binding ActualWidth, ElementName=RootGrid, Converter={StaticResource LayoutConverter}}" 
                   Y2="{Binding ActualHeight, ElementName=RootGrid}"/>
         </Canvas>
 
@@ -84,7 +129,7 @@
             <TextBlock x:Name="NotificationText" Foreground="#FFFFFF" FontSize="12" FontFamily="Consolas"/>
         </Border>
 
-        <Border x:Name="Sidebar" Width="260" HorizontalAlignment="Right" Background="#F80A0A0A" 
+        <Border x:Name="Sidebar" Width="260" HorizontalAlignment="Right" Background="#F8121212" 
                 BorderBrush="#00FFFF" BorderThickness="1,0,0,0" Panel.ZIndex="10">
             <Border.RenderTransform>
                 <TranslateTransform x:Name="SidebarTransform" X="260"/>
@@ -101,7 +146,7 @@
                 <TextBlock Text="LENS CORRECTION (K)" Margin="0,0,0,5" Foreground="#666" FontSize="10" FontWeight="Bold"/>
                 <CheckBox x:Name="CheckLens" Content="Enable Correction" IsChecked="False" Click="OnLensSettingChanged"/>
                 <TextBlock Text="CORRECTION AMOUNT [ / ]" Margin="0,5,0,5" Foreground="#666" FontSize="10" FontWeight="Bold"/>
-                <Slider x:Name="LensSlider" Minimum="-2.0" Maximum="2.0" Value="0.40" TickFrequency="0.05" IsSnapToTickEnabled="True" ValueChanged="OnLensSliderChanged"/>
+                <Slider x:Name="LensSlider" Minimum="-2.0" Maximum="2.0" Value="0.40" TickFrequency="0.05" IsSnapToTickEnabled="True"/>
 
                 <Separator Background="#222" Margin="0,15"/>
 
@@ -110,8 +155,14 @@
 
                 <StackPanel Margin="0,10,0,0">
                     <TextBlock Text="カスタム背景色" FontWeight="Bold" Margin="0,0,0,5"/>
-                    <Canvas x:Name="ColorPickerSvCanvas" Width="200" Height="150" Background="Gray"/>
-                    <Slider x:Name="SliderHue" Minimum="0" Maximum="360" Value="0" Margin="0,10,0,0" Width="200"/>
+                    <Canvas x:Name="ColorPickerSvCanvas" Width="200" Height="150" 
+                            Background="{x:Null}" 
+                            MouseLeftButtonDown="OnSvCanvas_MouseDown" 
+                            MouseMove="OnSvCanvas_MouseMove"/>
+                    <Slider x:Name="SliderHue" Minimum="0" Maximum="360" Value="0" 
+                            Margin="0,10,0,0" Width="200" 
+                            ValueChanged="OnHueSlider_ValueChanged"/>
+                    <TextBlock x:Name="HsvValueText" Foreground="#00FFFF" FontSize="12" Margin="0,5,0,0" Text="H: 0°, S: 0%, V: 0%"/>
                     <Grid Margin="0,10,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
