@@ -46,6 +46,9 @@ namespace ZiView
         public bool ShowReticle { get; set; } = true;
         public bool EnableLensCorrection { get; set; } = false;
         public double LensCorrectionAmount { get; set; } = 0.40;
+
+        // --- 追加: 背景色の設定を保存するプロパティ（デフォルト: 真の黒） ---
+        public string BackgroundColor { get; set; } = "#000000";
     }
 
     public partial class MainWindow : System.Windows.Window
@@ -261,6 +264,29 @@ namespace ZiView
             if (LensShader != null)
             {
                 LensShader.DistortionAmount = _config.EnableLensCorrection ? _config.LensCorrectionAmount : 0.0;
+            }
+            // 起動時にコンボボックスの選択状態を復元する処理
+            foreach (System.Windows.Controls.ComboBoxItem item in ComboBackground.Items)
+            {
+                if (item.Tag?.ToString() == _config.BackgroundColor)
+                {
+                    ComboBackground.SelectedItem = item;
+                    break;
+                }
+            }
+            // --- 追加: 背景色の適用処理 ---
+            try
+            {
+                var obj = new BrushConverter().ConvertFromString(_config.BackgroundColor);
+                if (obj is SolidColorBrush brush)
+                {
+                    // ルートグリッドなどの背景色を指定（XAMLの構成に合わせて変更）
+                    RootGrid.Background = brush;
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"Background Apply Error: {ex.Message}");
             }
         }
 
@@ -897,6 +923,16 @@ namespace ZiView
             // 倍率の適用
             ImgScale.ScaleX = newScale;
             ImgScale.ScaleY = newScale;
+        }
+
+        private void OnBackgroundSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            if (ComboBackground.SelectedItem is System.Windows.Controls.ComboBoxItem item && item.Tag != null)
+            {
+                _config.BackgroundColor = item.Tag.ToString()!;
+                ApplyConfigToUi();
+                SaveConfig();
+            }
         }
         private void ShowContextMenu()
         {

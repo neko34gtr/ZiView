@@ -108,6 +108,13 @@
                 <TextBlock Text="AI SPLIT RATIO" Margin="0,0,0,10" Foreground="#666" FontSize="10" FontWeight="Bold"/>
                 <Slider x:Name="SplitSlider" Minimum="0" Maximum="100" Value="100" TickFrequency="1" IsSnapToTickEnabled="True"/>
 
+                <TextBlock Text="背景色" FontWeight="Bold" Margin="0,10,0,5"/>
+                <ComboBox x:Name="ComboBackground" SelectionChanged="OnBackgroundSelectionChanged">
+                    <ComboBoxItem Content="真の黒 (#000000)" Tag="#000000"/>
+                    <ComboBoxItem Content="ダークグレー (#1A1A1A)" Tag="#1A1A1A"/>
+                    <ComboBoxItem Content="ミディアムグレー (#333333)" Tag="#333333"/>
+                </ComboBox>
+
                 <TextBlock Text="SYSTEM MONITOR" Margin="0,30,0,10" Foreground="#666" FontSize="10" FontWeight="Bold"/>
                 <Border Background="#121212" CornerRadius="2" Padding="12" BorderBrush="#222" BorderThickness="1">
                     <StackPanel>
