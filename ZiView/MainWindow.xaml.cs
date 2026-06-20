@@ -81,6 +81,7 @@ namespace ZiView
         private bool _isDragging;
         private AppConfig _config = new();
         private CancellationTokenSource? _cts;
+        private CustomColorPicker? _colorPicker;
 
         // 無限ループイベントを抑止するためのフラグ
         private bool _isUpdatingPageSliderInternal = false;
@@ -92,6 +93,19 @@ namespace ZiView
             WriteLog("ZiView Engine Starting (Native Core Standard)...");
 
             LoadConfig();
+
+            // カスタムカラーピッカーの初期化（適用時のコールバック処理をラムダ式で指定）
+            _colorPicker = new CustomColorPicker(
+                ColorPickerSvCanvas,
+                SliderHue,
+                PreviewColorBox,
+                (hexColor) =>
+                {
+                    _config.BackgroundColor = hexColor;
+                    ApplyConfigToUi();
+                    SaveConfig();
+                }
+            );
 
             // コマンドライン引数が存在する場合のみ、初期パスとして採用
             if (args != null && args.Length > 0)
@@ -166,7 +180,7 @@ namespace ZiView
                 _config.CheckSpread = CheckSpread.IsChecked ?? true;
                 _config.CheckAutoDetect = CheckAutoDetect.IsChecked ?? false;
                 _config.CheckPrefetch = CheckPrefetch.IsChecked ?? true;
-                _config.ShowReticle = CheckReticle.IsChecked ?? true;
+                _config.ShowReticle = ReticleOverlay.Visibility == Visibility.Visible;
                 _config.SplitSliderValue = SplitSlider.Value;
                 _config.LastSourcePath = _currentSourcePath ?? string.Empty;
 
@@ -265,22 +279,13 @@ namespace ZiView
             {
                 LensShader.DistortionAmount = _config.EnableLensCorrection ? _config.LensCorrectionAmount : 0.0;
             }
-            // 起動時にコンボボックスの選択状態を復元する処理
-            foreach (System.Windows.Controls.ComboBoxItem item in ComboBackground.Items)
-            {
-                if (item.Tag?.ToString() == _config.BackgroundColor)
-                {
-                    ComboBackground.SelectedItem = item;
-                    break;
-                }
-            }
-            // --- 追加: 背景色の適用処理 ---
+
+            // 背景色の適用処理（例外・Null対策済みの堅牢なコード）
             try
             {
                 var obj = new BrushConverter().ConvertFromString(_config.BackgroundColor);
                 if (obj is SolidColorBrush brush)
                 {
-                    // ルートグリッドなどの背景色を指定（XAMLの構成に合わせて変更）
                     RootGrid.Background = brush;
                 }
             }
@@ -598,8 +603,8 @@ namespace ZiView
                 {
                     var v = idx[y, x];
                     data[0 * w * h + y * w + x] = v.Item0 / 255f;
-                    data[1 * w * h + y * w + x] = v.Item1 / 255f;
-                    data[2 * w * h + y * w + x] = v.Item2 / 255f;
+                    data[0 * w * h + y * w + x] = v.Item1 / 255f;
+                    data[0 * w * h + y * w + x] = v.Item2 / 255f;
                 }
             }
 
@@ -813,7 +818,6 @@ namespace ZiView
                 case Key.OemOpenBrackets:
                     if (_config.EnableLensCorrection)
                     {
-                        // 0.01単位へ変更
                         _config.LensCorrectionAmount = Math.Round(_config.LensCorrectionAmount - 0.01, 2);
                         ApplyConfigToUi();
                         ShowNotification($"補正強度: {_config.LensCorrectionAmount:F2}");
@@ -824,7 +828,6 @@ namespace ZiView
                 case Key.OemCloseBrackets:
                     if (_config.EnableLensCorrection)
                     {
-                        // 0.01単位へ変更
                         _config.LensCorrectionAmount = Math.Round(_config.LensCorrectionAmount + 0.01, 2);
                         ApplyConfigToUi();
                         ShowNotification($"補正強度: {_config.LensCorrectionAmount:F2}");
@@ -846,7 +849,6 @@ namespace ZiView
             SaveConfig();
         }
 
-        //「レンズ補正（ディストーション補正）を行う際の『光学中心（光軸）』を視覚的に合わせるため」のガイドライン表示切替
         private void OnReticleSettingChanged(object sender, RoutedEventArgs e)
         {
             if (CheckReticle.IsChecked == true)
@@ -883,7 +885,6 @@ namespace ZiView
             BottomBarTransform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(show ? 0 : 80, TimeSpan.FromMilliseconds(200)));
         }
 
-        // このコードは必要ないのですが、将来的な機能拡張のために残しておきます
         private void MenuButton_Click(object sender, RoutedEventArgs e)
         {
             var menu = new System.Windows.Controls.ContextMenu();
@@ -902,48 +903,34 @@ namespace ZiView
             menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
             menu.IsOpen = true;
         }
+
         private void ZoomAtCursor(double delta)
         {
-            // マウスの現在位置をコンテナ基準で取得
             System.Windows.Point mousePos = Mouse.GetPosition(ImageContainer);
-
-            // 現在の倍率を取得
             double scale = ImgScale.ScaleX;
-            // 0.1倍〜5.0倍の範囲で制限
             double newScale = Math.Max(0.1, Math.Min(5.0, scale + delta));
-
-            // 拡大比率
             double ratio = newScale / scale;
 
-            // マウス位置を中心にスケーリングするためのオフセット計算
-            // これにより、ズーム時にカーソル位置がずれません
             ImgTranslate.X = (ImgTranslate.X - mousePos.X) * ratio + mousePos.X;
             ImgTranslate.Y = (ImgTranslate.Y - mousePos.Y) * ratio + mousePos.Y;
 
-            // 倍率の適用
             ImgScale.ScaleX = newScale;
             ImgScale.ScaleY = newScale;
         }
 
-        private void OnBackgroundSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        private void OnApplyCustomColorClick(object sender, RoutedEventArgs e)
         {
-            if (ComboBackground.SelectedItem is System.Windows.Controls.ComboBoxItem item && item.Tag != null)
-            {
-                _config.BackgroundColor = item.Tag.ToString()!;
-                ApplyConfigToUi();
-                SaveConfig();
-            }
+            _colorPicker?.ApplyColor();
         }
+
         private void ShowContextMenu()
         {
             var menu = new System.Windows.Controls.ContextMenu();
 
-            // 全画面表示切り替え
             var itemFullscreen = new System.Windows.Controls.MenuItem { Header = "全画面表示の切り替え" };
             itemFullscreen.Click += (s, ev) => ToggleFullscreen();
             menu.Items.Add(itemFullscreen);
 
-            // --- ここから追加 ---
             menu.Items.Add(new System.Windows.Controls.Separator());
 
             var itemLensToggle = new System.Windows.Controls.MenuItem { Header = "レンズ補正 (K) - ON/OFF" };
@@ -960,17 +947,16 @@ namespace ZiView
             var itemLensDec = new System.Windows.Controls.MenuItem { Header = "補正値ダウン ([) -0.01" };
             itemLensDec.Click += (s, ev) => AdjustLensCorrection(-0.01);
             menu.Items.Add(itemLensDec);
-            // --- ここまで追加 ---
 
             menu.Items.Add(new System.Windows.Controls.Separator());
 
-            // アプリ終了
             var itemExit = new System.Windows.Controls.MenuItem { Header = "アプリケーションを終了" };
             itemExit.Click += (s, ev) => Application.Current.Shutdown();
             menu.Items.Add(itemExit);
 
             menu.IsOpen = true;
         }
+
         private void AdjustLensCorrection(double delta)
         {
             if (!_config.EnableLensCorrection) _config.EnableLensCorrection = true;

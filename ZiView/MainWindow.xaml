@@ -108,12 +108,19 @@
                 <TextBlock Text="AI SPLIT RATIO" Margin="0,0,0,10" Foreground="#666" FontSize="10" FontWeight="Bold"/>
                 <Slider x:Name="SplitSlider" Minimum="0" Maximum="100" Value="100" TickFrequency="1" IsSnapToTickEnabled="True"/>
 
-                <TextBlock Text="背景色" FontWeight="Bold" Margin="0,10,0,5"/>
-                <ComboBox x:Name="ComboBackground" SelectionChanged="OnBackgroundSelectionChanged">
-                    <ComboBoxItem Content="真の黒 (#000000)" Tag="#000000"/>
-                    <ComboBoxItem Content="ダークグレー (#1A1A1A)" Tag="#1A1A1A"/>
-                    <ComboBoxItem Content="ミディアムグレー (#333333)" Tag="#333333"/>
-                </ComboBox>
+                <StackPanel Margin="0,10,0,0">
+                    <TextBlock Text="カスタム背景色" FontWeight="Bold" Margin="0,0,0,5"/>
+                    <Canvas x:Name="ColorPickerSvCanvas" Width="200" Height="150" Background="Gray"/>
+                    <Slider x:Name="SliderHue" Minimum="0" Maximum="360" Value="0" Margin="0,10,0,0" Width="200"/>
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Rectangle x:Name="PreviewColorBox" Grid.Column="0" Height="30" Fill="#000000" Margin="0,0,5,0"/>
+                        <Button Content="適用" Grid.Column="1" Padding="15,0,15,0" Click="OnApplyCustomColorClick"/>
+                    </Grid>
+                </StackPanel>
 
                 <TextBlock Text="SYSTEM MONITOR" Margin="0,30,0,10" Foreground="#666" FontSize="10" FontWeight="Bold"/>
                 <Border Background="#121212" CornerRadius="2" Padding="12" BorderBrush="#222" BorderThickness="1">
