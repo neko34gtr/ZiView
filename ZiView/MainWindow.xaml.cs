@@ -329,7 +329,13 @@ namespace ZiView
                 else if (File.Exists(path))
                 {
                     string ext = Path.GetExtension(path).ToLower(CultureInfo.InvariantCulture);
-                    if (ext == ".zip")
+
+                    // 単独の画像ファイルが指定された場合の処理を追加
+                    if (IsImageFile(path))
+                    {
+                        _imageList.Add(path);
+                    }
+                    else if (ext == ".zip")
                     {
                         using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
                         using (ZipArchive archive = new ZipArchive(fs, ZipArchiveMode.Read))
@@ -359,7 +365,6 @@ namespace ZiView
                 ResetTransform();
                 RefreshDisplay();
             }
-
         }
 
         public void LoadImage(string path)
