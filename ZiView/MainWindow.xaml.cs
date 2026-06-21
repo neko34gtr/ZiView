@@ -124,10 +124,52 @@ namespace ZiView
                 {
                     LoadSource(_currentSourcePath);
                 }
+
+                // 設定から読み込んだ背景色（_config.BackgroundColor）を反映し、カラーピッカーの状態を同期する
+                try
+                {
+                    var mediaColor = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_config.BackgroundColor);
+                    RgbToHsv(mediaColor, out _currentHue, out _currentSaturation, out _currentValue);
+                    SliderHue.Value = _currentHue;
+                }
+                catch { }
+
                 UpdateColorPickerBrush();
                 UpdatePreview();
             };
             SetupEvents();
+        }
+        private void RgbToHsv(System.Windows.Media.Color color, out double h, out double s, out double v)
+        {
+            double r = color.R / 255.0;
+            double g = color.G / 255.0;
+            double b = color.B / 255.0;
+
+            double min = Math.Min(Math.Min(r, g), b);
+            double max = Math.Max(Math.Max(r, g), b);
+            double delta = max - min;
+
+            v = max;
+            s = max == 0 ? 0 : delta / max;
+
+            if (delta == 0)
+            {
+                h = 0;
+            }
+            else if (max == r)
+            {
+                h = 60 * ((g - b) / delta % 6);
+            }
+            else if (max == g)
+            {
+                h = 60 * ((b - r) / delta + 2);
+            }
+            else
+            {
+                h = 60 * ((r - g) / delta + 4);
+            }
+
+            if (h < 0) h += 360;
         }
 
         private void InitLog()
@@ -328,28 +370,30 @@ namespace ZiView
                 }
                 else if (File.Exists(path))
                 {
-                    string ext = Path.GetExtension(path).ToLower(CultureInfo.InvariantCulture);
-
-                    // 単独の画像ファイルが指定された場合の処理を追加
+                    // パス自体が画像ファイルの場合は単一のリストとして登録する
                     if (IsImageFile(path))
                     {
                         _imageList.Add(path);
                     }
-                    else if (ext == ".zip")
+                    else
                     {
-                        using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        using (ZipArchive archive = new ZipArchive(fs, ZipArchiveMode.Read))
+                        string ext = Path.GetExtension(path).ToLower(CultureInfo.InvariantCulture);
+                        if (ext == ".zip")
                         {
-                            var keys = archive.Entries
-                                .Where(e => !string.IsNullOrEmpty(e.FullName) && IsImageFile(e.FullName))
-                                .Select(e => e.FullName)
-                                .OrderBy(k => k);
-                            _imageList.AddRange(keys);
+                            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                            using (ZipArchive archive = new ZipArchive(fs, ZipArchiveMode.Read))
+                            {
+                                var keys = archive.Entries
+                                    .Where(e => !string.IsNullOrEmpty(e.FullName) && IsImageFile(e.FullName))
+                                    .Select(e => e.FullName)
+                                    .OrderBy(k => k);
+                                _imageList.AddRange(keys);
+                            }
                         }
-                    }
-                    else if (ext == ".rar" || ext == ".7z")
-                    {
-                        _imageList.AddRange(GetArchiveFileListViaCli(path));
+                        else if (ext == ".rar" || ext == ".7z")
+                        {
+                            _imageList.AddRange(GetArchiveFileListViaCli(path));
+                        }
                     }
                 }
             }
@@ -436,6 +480,17 @@ namespace ZiView
         private Mat LoadMat(string key)
         {
             if (Directory.Exists(_currentSourcePath)) return Cv2.ImRead(key);
+
+            // 単一の画像ファイルを直接指定された場合の読み込みパスを追加
+            if (File.Exists(_currentSourcePath) && IsImageFile(_currentSourcePath))
+            {
+                return Cv2.ImRead(_currentSourcePath);
+            }
+
+            if (File.Exists(key) && IsImageFile(key))
+            {
+                return Cv2.ImRead(key);
+            }
 
             string ext = Path.GetExtension(_currentSourcePath ?? "").ToLower(CultureInfo.InvariantCulture);
             if (ext == ".zip")
