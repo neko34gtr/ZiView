@@ -349,8 +349,8 @@ namespace ZiView
             this.MouseMove += (s, e) =>
             {
                 var p = e.GetPosition(this);
-                AnimateSidebar(p.X > this.ActualWidth - (_isSidebarOpen ? 300 : 50));
-                AnimateBottomBar(p.Y > this.ActualHeight - 60);
+                AnimateSidebar(p.X > this.ActualWidth - (_isSidebarOpen ? 300 : 50) || Sidebar.IsMouseOver);
+                AnimateBottomBar(p.Y > this.ActualHeight - 60 || BottomBar.IsMouseOver);
             };
         }
 
@@ -359,6 +359,7 @@ namespace ZiView
             WriteLog($"Loading source tree: {path}");
             _currentSourcePath = path;
             _imageList.Clear();
+            int initialIndex = 0;
             try
             {
                 if (Directory.Exists(path))
@@ -370,10 +371,25 @@ namespace ZiView
                 }
                 else if (File.Exists(path))
                 {
-                    // パス自体が画像ファイルの場合は単一のリストとして登録する
+                    // パス自体が画像ファイルの場合は、親フォルダ内の画像を全てリスト化し、
+                    // 自身の位置を初期表示ページとすることで、フォルダ指定時と同様に前後移動を可能にする
                     if (IsImageFile(path))
                     {
-                        _imageList.Add(path);
+                        string? parentDir = Path.GetDirectoryName(path);
+                        if (!string.IsNullOrEmpty(parentDir) && Directory.Exists(parentDir))
+                        {
+                            var files = Directory.GetFiles(parentDir)
+                                .Where(f => !string.IsNullOrEmpty(f) && IsImageFile(f))
+                                .OrderBy(f => f);
+                            _imageList.AddRange(files);
+
+                            int idx = _imageList.FindIndex(f => string.Equals(f, path, StringComparison.OrdinalIgnoreCase));
+                            initialIndex = idx >= 0 ? idx : 0;
+                        }
+                        else
+                        {
+                            _imageList.Add(path);
+                        }
                     }
                     else
                     {
@@ -401,13 +417,15 @@ namespace ZiView
 
             if (_imageList.Count > 0)
             {
+                if (initialIndex < 0 || initialIndex >= _imageList.Count) initialIndex = 0;
+
                 _isUpdatingPageSliderInternal = true;
                 PageSlider.Maximum = _imageList.Count - 1;
-                PageSlider.Value = 0;
+                PageSlider.Value = initialIndex;
                 _isUpdatingPageSliderInternal = false;
 
                 ResetTransform();
-                RefreshDisplay();
+                DisplayPage(initialIndex);
             }
         }
 
@@ -480,12 +498,6 @@ namespace ZiView
         private Mat LoadMat(string key)
         {
             if (Directory.Exists(_currentSourcePath)) return Cv2.ImRead(key);
-
-            // 単一の画像ファイルを直接指定された場合の読み込みパスを追加
-            if (File.Exists(_currentSourcePath) && IsImageFile(_currentSourcePath))
-            {
-                return Cv2.ImRead(_currentSourcePath);
-            }
 
             if (File.Exists(key) && IsImageFile(key))
             {
