@@ -162,6 +162,90 @@
             <Setter Property="Height" Value="1"/>
             <Setter Property="Margin" Value="0,4,0,16"/>
         </Style>
+
+        <!-- コンボボックス：角丸＋アクセント枠 -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBg" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBg" Property="Background" Value="{StaticResource AccentDimBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ItemTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12"/>
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="Toggle" Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          Background="Transparent" BorderThickness="0" HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}"
+                                                BorderThickness="1" CornerRadius="8">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <ContentPresenter Grid.Column="0" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"
+                                                                   Content="{TemplateBinding Content}"/>
+                                                <Path Grid.Column="1" Margin="0,0,10,0" Data="M0,0 L6,6 L12,0" Stroke="{StaticResource TextSecondaryBrush}"
+                                                      StrokeThickness="1.5" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
+                                                   ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                   Margin="{TemplateBinding Padding}"/>
+                            </ToggleButton>
+                            <Popup x:Name="Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                                        CornerRadius="8" MinWidth="{TemplateBinding ActualWidth}" MaxHeight="220" Margin="0,4,0,0">
+                                    <Border.Effect>
+                                        <DropShadowEffect Color="Black" BlurRadius="16" ShadowDepth="4" Opacity="0.4"/>
+                                    </Border.Effect>
+                                    <ScrollViewer Margin="4" VerticalScrollBarVisibility="Auto">
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid x:Name="RootGrid" ClipToBounds="True">
@@ -245,6 +329,18 @@
                             <CheckBox x:Name="CheckAutoDetect" Content="ページ順の自動判定" IsChecked="False" Click="OnSettingChanged"/>
                             <CheckBox x:Name="CheckReticle" Content="レティクル表示" IsChecked="False" Click="OnReticleSettingChanged"/>
                             <CheckBox x:Name="CheckPrefetch" Content="AI先読み" IsChecked="True" Margin="0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardPanel}">
+                        <StackPanel>
+                            <TextBlock Text="AIモデル" Style="{StaticResource SectionLabel}"/>
+                            <TextBlock Text="特性・用途" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
+                            <ComboBox x:Name="CategoryComboBox" SelectionChanged="CategoryComboBox_SelectionChanged" Margin="0,0,0,12"/>
+                            <TextBlock Text="モデル" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
+                            <ComboBox x:Name="ModelComboBox" SelectionChanged="ModelComboBox_SelectionChanged" Margin="0,0,0,10"/>
+                            <Button Content="このモデルを除外" HorizontalAlignment="Right" FontSize="11" Padding="10,5"
+                                    Click="ExcludeModelButton_Click"/>
                         </StackPanel>
                     </Border>
 
