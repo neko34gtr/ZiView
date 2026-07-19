@@ -263,24 +263,33 @@ namespace ZiView
 
                 try
                 {
-                    WriteLog("Attempting TensorRT/CUDA...");
+                    WriteLog("Attempting TensorRT...");
                     options.AppendExecutionProvider_Tensorrt(0);
-                    options.AppendExecutionProvider_CUDA(0);
                     _activeEngineMode = "RTX (TensorRT)";
                 }
-                catch (Exception ex)
+                catch (Exception exTrt)
                 {
-                    WriteLog($"TensorRT/CUDA down: {ex.Message}");
+                    WriteLog($"TensorRT down: {exTrt.Message}");
                     try
                     {
-                        WriteLog("Attempting DirectML...");
-                        options.AppendExecutionProvider_DML(0);
-                        _activeEngineMode = "DirectML";
+                        WriteLog("Attempting CUDA...");
+                        options.AppendExecutionProvider_CUDA(0);
+                        _activeEngineMode = "RTX (CUDA)";
                     }
-                    catch (Exception ex2)
+                    catch (Exception exCuda)
                     {
-                        WriteLog($"DirectML down: {ex2.Message}");
-                        _activeEngineMode = "CPU Mode";
+                        WriteLog($"CUDA down: {exCuda.Message}");
+                        try
+                        {
+                            WriteLog("Attempting DirectML...");
+                            options.AppendExecutionProvider_DML(0);
+                            _activeEngineMode = "DirectML";
+                        }
+                        catch (Exception ex2)
+                        {
+                            WriteLog($"DirectML down: {ex2.Message}");
+                            _activeEngineMode = "CPU Mode";
+                        }
                     }
                 }
 
@@ -349,8 +358,8 @@ namespace ZiView
             this.MouseMove += (s, e) =>
             {
                 var p = e.GetPosition(this);
-                AnimateSidebar(p.X > this.ActualWidth - (_isSidebarOpen ? 300 : 50) || Sidebar.IsMouseOver);
-                AnimateBottomBar(p.Y > this.ActualHeight - 60 || BottomBar.IsMouseOver);
+                AnimateSidebar(p.X > this.ActualWidth - (_isSidebarOpen ? 340 : 50) || Sidebar.IsMouseOver);
+                AnimateBottomBar(p.Y > this.ActualHeight - 90 || BottomBar.IsMouseOver);
             };
         }
 
@@ -692,9 +701,14 @@ namespace ZiView
         private void UpdateImageDisplay()
         {
             if (_currentCombinedOriginal == null) return;
-            if (_currentCombinedUpscaled == null || SplitSlider.Value >= 100)
+            if (_currentCombinedUpscaled == null)
             {
                 MainImage.Source = _currentCombinedOriginal.ToWriteableBitmap();
+                return;
+            }
+            if (SplitSlider.Value >= 100)
+            {
+                MainImage.Source = _currentCombinedUpscaled.ToWriteableBitmap();
                 return;
             }
 
@@ -1051,14 +1065,14 @@ namespace ZiView
         {
             if (_isSidebarOpen == show) return;
             _isSidebarOpen = show;
-            SidebarTransform.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(show ? 0 : 260, TimeSpan.FromMilliseconds(200)));
+            SidebarTransform.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(show ? 0 : 320, TimeSpan.FromMilliseconds(200)));
         }
 
         private void AnimateBottomBar(bool show)
         {
             if (_isBottomBarOpen == show) return;
             _isBottomBarOpen = show;
-            BottomBarTransform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(show ? 0 : 80, TimeSpan.FromMilliseconds(200)));
+            BottomBarTransform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(show ? 0 : 110, TimeSpan.FromMilliseconds(200)));
         }
 
         private void MenuButton_Click(object sender, RoutedEventArgs e)

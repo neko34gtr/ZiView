@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:ZiView"
         Title="ZiView" Height="800" Width="1200"
-        Background="#050505" Foreground="White" 
+        Background="#0A0A0C" Foreground="White" 
         WindowStyle="SingleBorderWindow" AllowsTransparency="False"
         AllowDrop="True" Closing="Window_Closing"
         WindowStartupLocation="Manual">
@@ -11,33 +11,74 @@
     <Window.Resources>
         <local:HalfLayoutConverter x:Key="LayoutConverter"/>
 
+        <!-- ===== デザイントークン ===== -->
+        <SolidColorBrush x:Key="AccentBrush" Color="#00E5FF"/>
+        <SolidColorBrush x:Key="AccentDimBrush" Color="#0F5C66"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#101014"/>
+        <SolidColorBrush x:Key="CardBrush" Color="#16161B"/>
+        <SolidColorBrush x:Key="CardBorderBrush" Color="#232329"/>
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F2F2F5"/>
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#8A8A93"/>
+        <SolidColorBrush x:Key="TextCaptionBrush" Color="#6C6C76"/>
+
         <Style x:Key="LineStyle" TargetType="Line">
             <Setter Property="Stroke" Value="#4400FF00"/>
             <Setter Property="StrokeThickness" Value="1"/>
             <Setter Property="StrokeDashArray" Value="4 4"/>
         </Style>
 
+        <!-- セクション見出し（キャプション階層） -->
+        <Style x:Key="SectionLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextCaptionBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+        </Style>
+
+        <!-- カードパネル（表面の階層/Elevation） -->
+        <Style x:Key="CardPanel" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Margin" Value="0,0,0,16"/>
+        </Style>
+
+        <!-- スライダー：進捗フィル付きの薄型トラック＋グロー付きサム -->
         <Style TargetType="Slider">
-            <Setter Property="Background" Value="#333333"/>
-            <Setter Property="Foreground" Value="#00FFFF"/>
+            <Setter Property="Background" Value="#2A2A30"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">
-                        <Grid Height="24">
-                            <Border Background="#222222" BorderBrush="#333333" BorderThickness="1" 
-                                    Height="6" VerticalAlignment="Center" CornerRadius="3"/>
+                        <Grid Height="26">
+                            <Border Background="#1C1C21" BorderBrush="#2A2A30" BorderThickness="1"
+                                    Height="4" VerticalAlignment="Center" CornerRadius="2"/>
                             <Track Name="PART_Track">
                                 <Track.DecreaseRepeatButton>
-                                    <RepeatButton Style="{x:Null}" Template="{x:Null}" Background="Transparent"/>
+                                    <RepeatButton Background="{StaticResource AccentBrush}">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="{TemplateBinding Background}" Height="4"
+                                                        CornerRadius="2" VerticalAlignment="Center" Opacity="0.85"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
                                 </Track.DecreaseRepeatButton>
                                 <Track.IncreaseRepeatButton>
                                     <RepeatButton Style="{x:Null}" Template="{x:Null}" Background="Transparent"/>
                                 </Track.IncreaseRepeatButton>
                                 <Track.Thumb>
-                                    <Thumb Width="16" Height="16" Background="#00FFFF" BorderBrush="#00FFFF">
+                                    <Thumb Width="15" Height="15" Background="#FFFFFF" BorderBrush="{StaticResource AccentBrush}">
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
-                                                <Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="1"/>
+                                                <Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="2">
+                                                    <Ellipse.Effect>
+                                                        <DropShadowEffect Color="#00E5FF" BlurRadius="10" ShadowDepth="0" Opacity="0.75"/>
+                                                    </Ellipse.Effect>
+                                                </Ellipse>
                                             </ControlTemplate>
                                         </Thumb.Template>
                                     </Thumb>
@@ -49,27 +90,77 @@
             </Setter>
         </Style>
 
+        <!-- チェックボックス：トグルスイッチ表現 -->
         <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="#DDD"/>
-            <Setter Property="Margin" Value="0,8"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+            <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <StackPanel Orientation="Horizontal">
-                            <Grid Width="16" Height="16" Margin="0,0,8,0">
-                                <Rectangle Fill="#1A1A1A" Stroke="#00FF00" StrokeThickness="1"/>
-                                <Path x:Name="CheckMark" Data="M3,8 L7,12 L13,4" Stroke="#00FF00" StrokeThickness="2" Visibility="Collapsed"/>
-                            </Grid>
-                            <ContentPresenter VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ContentPresenter Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                            <Border x:Name="Track" Grid.Column="1" Width="38" Height="20" CornerRadius="10"
+                                    Background="#2A2A30" BorderBrush="#38383F" BorderThickness="1">
+                                <Ellipse x:Name="Knob" Width="14" Height="14" Fill="#8A8A93"
+                                         HorizontalAlignment="Left" Margin="2,0,0,0"/>
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource AccentDimBrush}"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Knob" Property="Fill" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Knob" Property="Margin" Value="0,0,2,0"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <!-- ボタン：角丸＋ホバーで反転 -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="#0A0A0C"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- セパレーター：控えめなヘアライン -->
+        <Style TargetType="Separator">
+            <Setter Property="Background" Value="{StaticResource CardBorderBrush}"/>
+            <Setter Property="Height" Value="1"/>
+            <Setter Property="Margin" Value="0,4,0,16"/>
         </Style>
     </Window.Resources>
 
@@ -123,74 +214,105 @@
         </Canvas>
 
         <Border x:Name="NotificationBadge" 
-                Background="#CC111111" CornerRadius="4" 
-                Padding="12,6" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,100"
+                Background="#EE16161B" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="10" 
+                Padding="14,8" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,110"
                 Visibility="Collapsed" IsHitTestVisible="False" Panel.ZIndex="20">
-            <TextBlock x:Name="NotificationText" Foreground="#FFFFFF" FontSize="12" FontFamily="Consolas"/>
+            <Border.Effect>
+                <DropShadowEffect Color="Black" BlurRadius="16" ShadowDepth="4" Opacity="0.4"/>
+            </Border.Effect>
+            <TextBlock x:Name="NotificationText" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontFamily="Consolas"/>
         </Border>
 
-        <Border x:Name="Sidebar" Width="260" HorizontalAlignment="Right" Background="#F8121212" 
-                BorderBrush="#00FFFF" BorderThickness="1,0,0,0" Panel.ZIndex="10">
+        <Border x:Name="Sidebar" Width="280" HorizontalAlignment="Right"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                CornerRadius="16" Margin="0,16,16,16" Panel.ZIndex="10">
+            <Border.Effect>
+                <DropShadowEffect Color="Black" BlurRadius="28" ShadowDepth="6" Direction="180" Opacity="0.45"/>
+            </Border.Effect>
             <Border.RenderTransform>
-                <TranslateTransform x:Name="SidebarTransform" X="260"/>
+                <TranslateTransform x:Name="SidebarTransform" X="320"/>
             </Border.RenderTransform>
-            <StackPanel Margin="20">
-                <TextBlock Text="ZiView SETTINGS" FontSize="16" FontWeight="Bold" Foreground="#00FFFF" Margin="0,0,0,25"/>
-                <CheckBox x:Name="CheckSpread" Content="Spread View (右開き)" IsChecked="False" Click="OnSettingChanged"/>
-                <CheckBox x:Name="CheckAutoDetect" Content="Auto Page Order" IsChecked="False" Click="OnSettingChanged"/>
-                <CheckBox x:Name="CheckReticle" Content="Show Reticle" IsChecked="False" Click="OnReticleSettingChanged"/>
-                <CheckBox x:Name="CheckPrefetch" Content="AI Prefetch" IsChecked="True"/>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="20,24,20,20">
+                    <TextBlock Text="ZiView" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <TextBlock Text="SETTINGS" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,2,0,20"/>
 
-                <Separator Background="#222" Margin="0,15"/>
+                    <Border Style="{StaticResource CardPanel}">
+                        <StackPanel>
+                            <TextBlock Text="表示" Style="{StaticResource SectionLabel}"/>
+                            <CheckBox x:Name="CheckSpread" Content="見開き表示（右開き）" IsChecked="False" Click="OnSettingChanged"/>
+                            <CheckBox x:Name="CheckAutoDetect" Content="ページ順の自動判定" IsChecked="False" Click="OnSettingChanged"/>
+                            <CheckBox x:Name="CheckReticle" Content="レティクル表示" IsChecked="False" Click="OnReticleSettingChanged"/>
+                            <CheckBox x:Name="CheckPrefetch" Content="AI先読み" IsChecked="True" Margin="0"/>
+                        </StackPanel>
+                    </Border>
 
-                <TextBlock Text="LENS CORRECTION (K)" Margin="0,0,0,5" Foreground="#666" FontSize="10" FontWeight="Bold"/>
-                <CheckBox x:Name="CheckLens" Content="Enable Correction" IsChecked="False" Click="OnLensSettingChanged"/>
-                <TextBlock Text="CORRECTION AMOUNT [ / ]" Margin="0,5,0,5" Foreground="#666" FontSize="10" FontWeight="Bold"/>
-                <Slider x:Name="LensSlider" Minimum="-2.0" Maximum="2.0" Value="0.40" TickFrequency="0.05" IsSnapToTickEnabled="True"/>
+                    <Border Style="{StaticResource CardPanel}">
+                        <StackPanel>
+                            <TextBlock Text="レンズ補正 (K)" Style="{StaticResource SectionLabel}"/>
+                            <CheckBox x:Name="CheckLens" Content="補正を有効化" IsChecked="False" Click="OnLensSettingChanged"/>
+                            <TextBlock Text="補正量  [ / ]" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,8"/>
+                            <Slider x:Name="LensSlider" Minimum="-2.0" Maximum="2.0" Value="0.40" TickFrequency="0.05" IsSnapToTickEnabled="True"/>
+                        </StackPanel>
+                    </Border>
 
-                <Separator Background="#222" Margin="0,15"/>
+                    <Border Style="{StaticResource CardPanel}">
+                        <StackPanel>
+                            <TextBlock Text="AI分割比率" Style="{StaticResource SectionLabel}"/>
+                            <Slider x:Name="SplitSlider" Minimum="0" Maximum="100" Value="100" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                        </StackPanel>
+                    </Border>
 
-                <TextBlock Text="AI SPLIT RATIO" Margin="0,0,0,10" Foreground="#666" FontSize="10" FontWeight="Bold"/>
-                <Slider x:Name="SplitSlider" Minimum="0" Maximum="100" Value="100" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                    <Border Style="{StaticResource CardPanel}">
+                        <StackPanel>
+                            <TextBlock Text="カスタム背景色" Style="{StaticResource SectionLabel}"/>
+                            <Border CornerRadius="8" ClipToBounds="True" Margin="0,0,0,10">
+                                <Canvas x:Name="ColorPickerSvCanvas" Width="236" Height="150"
+                                        Background="{x:Null}"
+                                        MouseLeftButtonDown="OnSvCanvas_MouseDown"
+                                        MouseMove="OnSvCanvas_MouseMove"/>
+                            </Border>
+                            <Slider x:Name="SliderHue" Minimum="0" Maximum="360" Value="0"
+                                    ValueChanged="OnHueSlider_ValueChanged"/>
+                            <TextBlock x:Name="HsvValueText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,10,0,0" Text="H: 0°, S: 0%, V: 0%"/>
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" CornerRadius="8" Margin="0,0,10,0" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1">
+                                    <Rectangle x:Name="PreviewColorBox" Height="32" Fill="#000000" RadiusX="7" RadiusY="7"/>
+                                </Border>
+                                <Button Content="適用" Grid.Column="1" Click="OnApplyCustomColorClick"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
 
-                <StackPanel Margin="0,10,0,0">
-                    <TextBlock Text="カスタム背景色" FontWeight="Bold" Margin="0,0,0,5"/>
-                    <Canvas x:Name="ColorPickerSvCanvas" Width="200" Height="150" 
-                            Background="{x:Null}" 
-                            MouseLeftButtonDown="OnSvCanvas_MouseDown" 
-                            MouseMove="OnSvCanvas_MouseMove"/>
-                    <Slider x:Name="SliderHue" Minimum="0" Maximum="360" Value="0" 
-                            Margin="0,10,0,0" Width="200" 
-                            ValueChanged="OnHueSlider_ValueChanged"/>
-                    <TextBlock x:Name="HsvValueText" Foreground="#00FFFF" FontSize="12" Margin="0,5,0,0" Text="H: 0°, S: 0%, V: 0%"/>
-                    <Grid Margin="0,10,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <Rectangle x:Name="PreviewColorBox" Grid.Column="0" Height="30" Fill="#000000" Margin="0,0,5,0"/>
-                        <Button Content="適用" Grid.Column="1" Padding="15,0,15,0" Click="OnApplyCustomColorClick"/>
-                    </Grid>
+                    <Border Style="{StaticResource CardPanel}" Margin="0">
+                        <StackPanel>
+                            <TextBlock Text="システムモニター" Style="{StaticResource SectionLabel}"/>
+                            <TextBlock x:Name="StatusText" Text="Ready" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" FontSize="12"/>
+                            <TextBlock x:Name="MemoryText" Text="RAM: -- MB" Foreground="{StaticResource AccentBrush}" Margin="0,8,0,0" FontSize="12" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
-
-                <TextBlock Text="SYSTEM MONITOR" Margin="0,30,0,10" Foreground="#666" FontSize="10" FontWeight="Bold"/>
-                <Border Background="#121212" CornerRadius="2" Padding="12" BorderBrush="#222" BorderThickness="1">
-                    <StackPanel>
-                        <TextBlock x:Name="StatusText" Text="Ready" Foreground="#00FFFF" TextWrapping="Wrap" FontSize="11"/>
-                        <TextBlock x:Name="MemoryText" Text="RAM: -- MB" Foreground="#00FF00" Margin="0,8,0,0" FontSize="11"/>
-                    </StackPanel>
-                </Border>
-            </StackPanel>
+            </ScrollViewer>
         </Border>
 
-        <Border x:Name="BottomBar" Height="80" VerticalAlignment="Bottom" Background="#F80F0F0F" 
-                BorderBrush="#1A1A1A" BorderThickness="0,1,0,0" Panel.ZIndex="10">
+        <Border x:Name="BottomBar" Height="64" VerticalAlignment="Bottom" HorizontalAlignment="Stretch"
+                Background="#EE121216" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                CornerRadius="20" Margin="40,0,40,20" Panel.ZIndex="10">
+            <Border.Effect>
+                <DropShadowEffect Color="Black" BlurRadius="24" ShadowDepth="8" Direction="270" Opacity="0.5"/>
+            </Border.Effect>
             <Border.RenderTransform>
-                <TranslateTransform x:Name="BottomBarTransform" Y="80"/>
+                <TranslateTransform x:Name="BottomBarTransform" Y="110"/>
             </Border.RenderTransform>
-            <DockPanel Margin="30,0">
-                <TextBlock x:Name="PageText" Text="P.0 / 0" VerticalAlignment="Center" Width="120" Foreground="#00FFFF" FontWeight="Bold" FontSize="14"/>
-                <Slider x:Name="PageSlider" VerticalAlignment="Center" IsDirectionReversed="True" Minimum="0" Maximum="0" Margin="10,0"/>
+            <DockPanel Margin="28,0">
+                <TextBlock x:Name="PageText" Text="P.0 / 0" VerticalAlignment="Center" Width="110"
+                           Foreground="{StaticResource TextPrimaryBrush}" FontWeight="SemiBold" FontSize="14"/>
+                <Slider x:Name="PageSlider" VerticalAlignment="Center" IsDirectionReversed="True" Minimum="0" Maximum="0" Margin="14,0,0,0"/>
             </DockPanel>
         </Border>
     </Grid>
