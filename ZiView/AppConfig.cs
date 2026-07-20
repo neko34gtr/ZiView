@@ -35,5 +35,17 @@ namespace ZiView
 
         // AI進捗OSDの表示位置: TopCenter / TopLeft / TopRight / BottomCenter
         public string AiOsdPosition { get; set; } = "TopCenter";
+
+        // 推論エンジンの優先モード: "TensorRT"(TensorRT→CUDA→CPU) / "CUDA"(CUDA→CPUのみ)
+        public string EnginePreference { get; set; } = "TensorRT";
+
+        // AIモデル(*.onnx)を探すフォルダ。空文字はプログラムルート（従来互換）。
+        // 相対パスの場合はプログラムルートからの相対、絶対パスならそのまま使用する。
+        public string ModelFolder { get; set; } = "";
+
+        // TensorRTのエンジンキャッシュ(ビルド済み最適化エンジン)をディスクへ永続化するか。
+        // ONにすると初回のみ低速（エンジンビルド）、2回目以降は大幅に高速化される。
+        // ディスク容量が気になる場合はOFFにするか、SettingsWindowからキャッシュを削除できる。
+        public bool TensorRtEngineCacheEnabled { get; set; } = true;
     }
 }

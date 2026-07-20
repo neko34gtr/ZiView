@@ -210,6 +210,12 @@ namespace ZiView
 
             menu.Items.Add(new System.Windows.Controls.Separator());
 
+            var itemSettings = new System.Windows.Controls.MenuItem { Header = "設定..." };
+            itemSettings.Click += (s, ev) => OpenSettingsWindow();
+            menu.Items.Add(itemSettings);
+
+            menu.Items.Add(new System.Windows.Controls.Separator());
+
             var itemExit = new System.Windows.Controls.MenuItem { Header = "アプリケーションを終了" };
             itemExit.Click += (s, ev) => Application.Current.Shutdown();
             menu.Items.Add(itemExit);
@@ -260,11 +266,51 @@ namespace ZiView
 
             menu.Items.Add(new System.Windows.Controls.Separator());
 
+            var itemSettings = new System.Windows.Controls.MenuItem { Header = "設定..." };
+            itemSettings.Click += (s, ev) => OpenSettingsWindow();
+            menu.Items.Add(itemSettings);
+
+            menu.Items.Add(new System.Windows.Controls.Separator());
+
             var itemExit = new System.Windows.Controls.MenuItem { Header = "アプリケーションを終了" };
             itemExit.Click += (s, ev) => Application.Current.Shutdown();
             menu.Items.Add(itemExit);
 
             menu.IsOpen = true;
+        }
+
+        /// <summary>
+        /// AIモデル管理・推論エンジン設定を行う専用ウィンドウを開く。
+        /// 「保存して閉じる」で確定した場合のみ、モデル一覧・現在のモデルを再構築する。
+        /// </summary>
+        private async void OpenSettingsWindow()
+        {
+            var settingsWindow = new SettingsWindow(_config) { Owner = this };
+            bool? result = settingsWindow.ShowDialog();
+
+            if (result == true && settingsWindow.SettingsChanged)
+            {
+                SaveConfig();
+                WriteLog($"Settings updated. EnginePreference={_config.EnginePreference}, ExcludedModels={_config.ExcludedModels.Count}");
+
+                ScanOnnxModels();
+
+                // 現在使用中のモデルが除外された可能性があるため、選択中モデルへ切り替え直す
+                if (ModelComboBox.SelectedItem is string currentModel)
+                {
+                    await ApplyModelSelectionAsync(currentModel);
+                }
+                else
+                {
+                    // エンジン設定のみの変更でモデル一覧に変化がない場合も、
+                    // エンジン優先モードの変更を反映するため再初期化する
+                    _onnxSession?.Dispose();
+                    _onnxSession = null;
+                    _inputName = null;
+                    InitializeAi();
+                    if (_imageList.Count > 0) RefreshDisplay();
+                }
+            }
         }
 
         private void AdjustLensCorrection(double delta)

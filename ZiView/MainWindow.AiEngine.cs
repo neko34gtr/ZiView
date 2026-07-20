@@ -33,7 +33,7 @@ namespace ZiView
         {
             try
             {
-                string modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, modelFileName);
+                string modelPath = Path.Combine(GetModelDirectory(_config.ModelFolder), modelFileName);
                 if (!File.Exists(modelPath))
                 {
                     WriteLog("ERROR: Model file not found at " + modelPath);
@@ -43,17 +43,11 @@ namespace ZiView
 
                 var options = new SessionOptions();
                 var available = OrtEnv.Instance().GetAvailableProviders();
-                WriteLog($"Available Providers: {string.Join(", ", available)}");
+                WriteLog($"Available Providers: {string.Join(", ", available)}. Preference: {_config.EnginePreference}");
 
-                try
+                if (_config.EnginePreference == "CUDA")
                 {
-                    WriteLog("Attempting TensorRT...");
-                    options.AppendExecutionProvider_Tensorrt(0);
-                    _activeEngineMode = "RTX (TensorRT)";
-                }
-                catch (Exception exTrt)
-                {
-                    WriteLog($"TensorRT down: {exTrt.Message}");
+                    // CUDA優先モード: TensorRTは試さず、CUDA→CPUのみで軽快に確定させる
                     try
                     {
                         WriteLog("Attempting CUDA...");
@@ -63,15 +57,49 @@ namespace ZiView
                     catch (Exception exCuda)
                     {
                         WriteLog($"CUDA down: {exCuda.Message}");
+                        _activeEngineMode = "CPU Mode";
+                    }
+                }
+                else
+                {
+                    // TensorRT優先モード: TensorRT→CUDA→CPU の順にフォールバック
+                    try
+                    {
+                        WriteLog("Attempting TensorRT...");
+                        if (_config.TensorRtEngineCacheEnabled)
+                        {
+                            string cacheDir = GetTensorRtCacheDirectory();
+                            Directory.CreateDirectory(cacheDir);
+
+                            var trtOptions = new OrtTensorRTProviderOptions();
+                            trtOptions.UpdateOptions(new Dictionary<string, string>
+                            {
+                                ["device_id"] = "0",
+                                ["trt_engine_cache_enable"] = "1",
+                                ["trt_engine_cache_path"] = cacheDir,
+                                ["trt_timing_cache_enable"] = "1",
+                            });
+                            options.AppendExecutionProvider_Tensorrt(trtOptions);
+                            WriteLog($"TensorRT engine cache enabled: {cacheDir}");
+                        }
+                        else
+                        {
+                            options.AppendExecutionProvider_Tensorrt(0);
+                        }
+                        _activeEngineMode = "RTX (TensorRT)";
+                    }
+                    catch (Exception exTrt)
+                    {
+                        WriteLog($"TensorRT down: {exTrt.Message}");
                         try
                         {
-                            WriteLog("Attempting DirectML...");
-                            options.AppendExecutionProvider_DML(0);
-                            _activeEngineMode = "DirectML";
+                            WriteLog("Attempting CUDA...");
+                            options.AppendExecutionProvider_CUDA(0);
+                            _activeEngineMode = "RTX (CUDA)";
                         }
-                        catch (Exception ex2)
+                        catch (Exception exCuda)
                         {
-                            WriteLog($"DirectML down: {ex2.Message}");
+                            WriteLog($"CUDA down: {exCuda.Message}");
                             _activeEngineMode = "CPU Mode";
                         }
                     }
@@ -98,12 +126,15 @@ namespace ZiView
                 _fixedInputSize = null;
                 if (_inputName != null)
                 {
-                    var dims = _onnxSession.InputMetadata[_inputName].Dimensions;
+                    var meta = _onnxSession.InputMetadata[_inputName];
+                    var dims = meta.Dimensions;
                     if (dims.Length >= 4 && dims[2] > 0 && dims[3] > 0)
                     {
                         _fixedInputSize = Math.Max(dims[2], dims[3]);
                         WriteLog($"Model requires fixed input shape: {dims[2]}x{dims[3]}");
                     }
+                    bool isFp16 = meta.ElementType == typeof(Float16);
+                    WriteLog($"Model precision: {(isFp16 ? "fp16" : "fp32")}");
                 }
 
                 StatusText.Text = $"Mode: {_activeEngineMode}";
@@ -129,7 +160,25 @@ namespace ZiView
             { "1xDenoise_realplksr_otf_fp32.onnx", "ノイズ除去" },
         };
 
-        private static string GetModelCategory(string fileName)
+        /// <summary>
+        /// 設定された ModelFolder を絶対パスへ解決する。
+        /// 空文字はプログラムルート（従来互換）、相対パスはルートからの相対、絶対パスはそのまま使用する。
+        /// </summary>
+        internal static string GetModelDirectory(string configuredFolder)
+        {
+            string root = AppDomain.CurrentDomain.BaseDirectory;
+            if (string.IsNullOrWhiteSpace(configuredFolder)) return root;
+            return Path.IsPathRooted(configuredFolder) ? configuredFolder : Path.Combine(root, configuredFolder);
+        }
+
+        /// <summary>
+        /// TensorRTエンジンキャッシュの保存先。プログラムルート直下の固定フォルダとし、
+        /// ModelFolderの変更に影響されないようにする。
+        /// </summary>
+        internal static string GetTensorRtCacheDirectory() =>
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trt_cache");
+
+        internal static string GetModelCategory(string fileName)
         {
             if (_modelCategoryMap.TryGetValue(fileName, out var cat)) return cat;
 
@@ -167,18 +216,33 @@ namespace ZiView
         {
             try
             {
-                string root = AppDomain.CurrentDomain.BaseDirectory;
-                var files = Directory.GetFiles(root, "*.onnx")
-                    .Select(Path.GetFileName)
-                    .Where(f => !string.IsNullOrEmpty(f))
-                    .Select(f => f!)
-                    .Where(f => !_config.ExcludedModels.Contains(f))
-                    .OrderBy(f => f)
-                    .ToList();
+                string root = GetModelDirectory(_config.ModelFolder);
+                if (!Directory.Exists(root))
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(root);
+                        WriteLog($"Model folder did not exist, created: {root}");
+                    }
+                    catch (Exception exCreate)
+                    {
+                        WriteLog($"Model folder creation failed: {exCreate.Message}");
+                    }
+                }
+
+                var files = Directory.Exists(root)
+                    ? Directory.GetFiles(root, "*.onnx")
+                        .Select(Path.GetFileName)
+                        .Where(f => !string.IsNullOrEmpty(f))
+                        .Select(f => f!)
+                        .Where(f => !_config.ExcludedModels.Contains(f))
+                        .OrderBy(f => f)
+                        .ToList()
+                    : new List<string>();
 
                 if (files.Count == 0)
                 {
-                    WriteLog("ERROR: No usable .onnx model files found (all excluded or missing).");
+                    WriteLog($"ERROR: No usable .onnx model files found in '{root}' (all excluded or missing).");
                     StatusText.Text = "Mode: Model Missing";
                     CategoryComboBox.ItemsSource = null;
                     ModelComboBox.ItemsSource = null;
@@ -260,33 +324,6 @@ namespace ZiView
             if (_imageList.Count > 0)
             {
                 RefreshDisplay();
-            }
-        }
-
-        /// <summary>
-        /// 現在選択中のモデルを「除外」リストへ登録し、選択肢から外す。
-        /// 実用に耐えないモデル（極端に重い等）を今後選ばせないための恒久設定。
-        /// </summary>
-        private async void ExcludeModelButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (ModelComboBox.SelectedItem is not string modelFileName) return;
-
-            var result = System.Windows.MessageBox.Show(
-                $"「{modelFileName}」を選択肢から除外します。\n（設定ファイルに保存され、再起動後も除外されたままになります）\n\nよろしいですか？",
-                "モデルの除外", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (result != MessageBoxResult.Yes) return;
-
-            if (!_config.ExcludedModels.Contains(modelFileName))
-            {
-                _config.ExcludedModels.Add(modelFileName);
-            }
-            WriteLog($"Model excluded by user: {modelFileName}");
-
-            ScanOnnxModels();
-            SaveConfig();
-            if (ModelComboBox.SelectedItem is string newModel)
-            {
-                await ApplyModelSelectionAsync(newModel);
             }
         }
 
@@ -440,44 +477,101 @@ namespace ZiView
             return output;
         }
 
+        [ThreadStatic] private static Float16[]? _tileInputBufferFp16;
+
         private Mat ProcessTile(Mat tile)
         {
             int w = tile.Width, h = tile.Height;
             using var rgb = new Mat();
             Cv2.CvtColor(tile, rgb, ColorConversionCodes.BGR2RGB);
 
+            // 入力テンソルの要素型を見て fp16/fp32 を自動判定する（fp16軽量版モデル対応）
+            bool useFp16 = _inputName != null && _onnxSession!.InputMetadata[_inputName].ElementType == typeof(Float16);
+
             int required = 3 * w * h;
-            if (_tileInputBuffer == null || _tileInputBuffer.Length < required)
-            {
-                _tileInputBuffer = new float[required];
-            }
-            float[] data = _tileInputBuffer;
-
             var idx = rgb.GetUnsafeGenericIndexer<Vec3b>();
-            for (int y = 0; y < h; y++)
+            List<NamedOnnxValue> inputs;
+
+            if (useFp16)
             {
-                for (int x = 0; x < w; x++)
+                if (_tileInputBufferFp16 == null || _tileInputBufferFp16.Length < required)
                 {
-                    var v = idx[y, x];
-                    data[0 * w * h + y * w + x] = v.Item0 / 255f;
-                    data[1 * w * h + y * w + x] = v.Item1 / 255f;
-                    data[2 * w * h + y * w + x] = v.Item2 / 255f;
+                    _tileInputBufferFp16 = new Float16[required];
                 }
+                var data16 = _tileInputBufferFp16;
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        var v = idx[y, x];
+                        data16[0 * w * h + y * w + x] = (Float16)(v.Item0 / 255f);
+                        data16[1 * w * h + y * w + x] = (Float16)(v.Item1 / 255f);
+                        data16[2 * w * h + y * w + x] = (Float16)(v.Item2 / 255f);
+                    }
+                }
+                var tensor16 = required == data16.Length
+                    ? new DenseTensor<Float16>(data16, new[] { 1, 3, h, w })
+                    : new DenseTensor<Float16>(new Memory<Float16>(data16, 0, required), new[] { 1, 3, h, w });
+                inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_inputName ?? "input", tensor16) };
+            }
+            else
+            {
+                if (_tileInputBuffer == null || _tileInputBuffer.Length < required)
+                {
+                    _tileInputBuffer = new float[required];
+                }
+                var data = _tileInputBuffer;
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        var v = idx[y, x];
+                        data[0 * w * h + y * w + x] = v.Item0 / 255f;
+                        data[1 * w * h + y * w + x] = v.Item1 / 255f;
+                        data[2 * w * h + y * w + x] = v.Item2 / 255f;
+                    }
+                }
+                // バッファを使い回すため、テンソルには実サイズ分だけを渡す（末尾の余剰領域は無視される）
+                var tensor = required == data.Length
+                    ? new DenseTensor<float>(data, new[] { 1, 3, h, w })
+                    : new DenseTensor<float>(new Memory<float>(data, 0, required), new[] { 1, 3, h, w });
+                inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_inputName ?? "input", tensor) };
             }
 
-            // バッファを使い回すため、テンソルには実サイズ分だけを渡す（末尾の余剰領域は無視される）
-            var tensor = required == data.Length
-                ? new DenseTensor<float>(data, new[] { 1, 3, h, w })
-                : new DenseTensor<float>(new Memory<float>(data, 0, required), new[] { 1, 3, h, w });
-            var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_inputName ?? "input", tensor) };
             using var results = _onnxSession!.Run(inputs);
+
+            int outH, outW;
+            Mat res;
+
+            if (useFp16)
+            {
+                // fp16モデルは出力も同じくfp16である前提（fp16変換モデルの一般的な仕様）
+                var output16 = results.First().AsTensor<Float16>();
+                outH = output16.Dimensions[2];
+                outW = output16.Dimensions[3];
+                res = new Mat(outH, outW, MatType.CV_8UC3);
+                var resIdx16 = res.GetUnsafeGenericIndexer<Vec3b>();
+                for (int y = 0; y < outH; y++)
+                {
+                    for (int x = 0; x < outW; x++)
+                    {
+                        resIdx16[y, x] = new Vec3b(
+                            (byte)Math.Clamp((float)output16[0, 2, y, x] * 255, 0, 255),
+                            (byte)Math.Clamp((float)output16[0, 1, y, x] * 255, 0, 255),
+                            (byte)Math.Clamp((float)output16[0, 0, y, x] * 255, 0, 255)
+                        );
+                    }
+                }
+                return res;
+            }
+
             var output = results.First().AsTensor<float>();
 
             // 出力サイズをテンソルの実寸から取得する（モデルのスケール倍率を仮定しない）
-            int outH = output.Dimensions[2];
-            int outW = output.Dimensions[3];
+            outH = output.Dimensions[2];
+            outW = output.Dimensions[3];
 
-            Mat res = new Mat(outH, outW, MatType.CV_8UC3);
+            res = new Mat(outH, outW, MatType.CV_8UC3);
             var resIdx = res.GetUnsafeGenericIndexer<Vec3b>();
             for (int y = 0; y < outH; y++)
             {

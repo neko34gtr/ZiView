@@ -357,9 +357,7 @@
                             <TextBlock Text="特性・用途" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
                             <ComboBox x:Name="CategoryComboBox" SelectionChanged="CategoryComboBox_SelectionChanged" Margin="0,0,0,12"/>
                             <TextBlock Text="モデル" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
-                            <ComboBox x:Name="ModelComboBox" SelectionChanged="ModelComboBox_SelectionChanged" Margin="0,0,0,10"/>
-                            <Button Content="このモデルを除外" HorizontalAlignment="Right" FontSize="11" Padding="10,5"
-                                    Click="ExcludeModelButton_Click"/>
+                            <ComboBox x:Name="ModelComboBox" SelectionChanged="ModelComboBox_SelectionChanged" Margin="0"/>
                         </StackPanel>
                     </Border>
 
