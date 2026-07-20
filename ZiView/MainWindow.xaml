@@ -307,6 +307,23 @@
             <TextBlock x:Name="NotificationText" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontFamily="Consolas"/>
         </Border>
 
+        <Border x:Name="AiProgressOsd"
+                Background="#EE16161B" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="10"
+                Padding="16,10" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,20,0,0"
+                Visibility="Collapsed" IsHitTestVisible="False" Panel.ZIndex="20">
+            <Border.Effect>
+                <DropShadowEffect Color="Black" BlurRadius="16" ShadowDepth="4" Opacity="0.4"/>
+            </Border.Effect>
+            <StackPanel MinWidth="220">
+                <TextBlock x:Name="AiProgressText" Text="AI変換中..." Foreground="{StaticResource TextPrimaryBrush}"
+                           FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                <Border x:Name="AiProgressBarTrack" Background="#2A2A30" CornerRadius="2" Height="4">
+                    <Border x:Name="AiProgressBarFill" Background="{StaticResource AccentBrush}" CornerRadius="2"
+                            Height="4" HorizontalAlignment="Left" Width="0"/>
+                </Border>
+            </StackPanel>
+        </Border>
+
         <Border x:Name="Sidebar" Width="280" HorizontalAlignment="Right"
                 Background="{StaticResource SurfaceBrush}"
                 BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
@@ -328,7 +345,9 @@
                             <CheckBox x:Name="CheckSpread" Content="見開き表示（右開き）" IsChecked="False" Click="OnSettingChanged"/>
                             <CheckBox x:Name="CheckAutoDetect" Content="ページ順の自動判定" IsChecked="False" Click="OnSettingChanged"/>
                             <CheckBox x:Name="CheckReticle" Content="レティクル表示" IsChecked="False" Click="OnReticleSettingChanged"/>
-                            <CheckBox x:Name="CheckPrefetch" Content="AI先読み" IsChecked="True" Margin="0"/>
+                            <CheckBox x:Name="CheckPrefetch" Content="AI先読み" IsChecked="True"/>
+                            <TextBlock Text="AI進捗OSDの表示位置" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,6"/>
+                            <ComboBox x:Name="AiOsdPositionComboBox" SelectionChanged="AiOsdPositionComboBox_SelectionChanged"/>
                         </StackPanel>
                     </Border>
 
