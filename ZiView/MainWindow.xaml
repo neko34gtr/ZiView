@@ -354,10 +354,13 @@
                     <Border Style="{StaticResource CardPanel}">
                         <StackPanel>
                             <TextBlock Text="AIモデル" Style="{StaticResource SectionLabel}"/>
+                            <CheckBox x:Name="CheckAiEnable" Content="AI推論を有効化" IsChecked="True" Click="OnAiEnableChanged"/>
                             <TextBlock Text="特性・用途" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
-                            <ComboBox x:Name="CategoryComboBox" SelectionChanged="CategoryComboBox_SelectionChanged" Margin="0,0,0,12"/>
+                            <ComboBox x:Name="CategoryComboBox" SelectionChanged="CategoryComboBox_SelectionChanged" Margin="0,0,0,12"
+                                      IsEnabled="{Binding IsChecked, ElementName=CheckAiEnable}"/>
                             <TextBlock Text="モデル" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
-                            <ComboBox x:Name="ModelComboBox" SelectionChanged="ModelComboBox_SelectionChanged" Margin="0"/>
+                            <ComboBox x:Name="ModelComboBox" SelectionChanged="ModelComboBox_SelectionChanged" Margin="0"
+                                      IsEnabled="{Binding IsChecked, ElementName=CheckAiEnable}"/>
                         </StackPanel>
                     </Border>
 

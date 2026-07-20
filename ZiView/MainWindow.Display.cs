@@ -39,7 +39,7 @@ namespace ZiView
                 {
                     var files = Directory.GetFiles(path)
                         .Where(f => !string.IsNullOrEmpty(f) && IsImageFile(f))
-                        .OrderBy(f => f);
+                        .OrderBy(f => f, NaturalStringComparer.Instance);
                     _imageList.AddRange(files);
                 }
                 else if (File.Exists(path))
@@ -53,7 +53,7 @@ namespace ZiView
                         {
                             var files = Directory.GetFiles(parentDir)
                                 .Where(f => !string.IsNullOrEmpty(f) && IsImageFile(f))
-                                .OrderBy(f => f);
+                                .OrderBy(f => f, NaturalStringComparer.Instance);
                             _imageList.AddRange(files);
 
                             int idx = _imageList.FindIndex(f => string.Equals(f, path, StringComparison.OrdinalIgnoreCase));
@@ -75,7 +75,7 @@ namespace ZiView
                                 var keys = archive.Entries
                                     .Where(e => !string.IsNullOrEmpty(e.FullName) && IsImageFile(e.FullName))
                                     .Select(e => e.FullName)
-                                    .OrderBy(k => k);
+                                    .OrderBy(k => k, NaturalStringComparer.Instance);
                                 _imageList.AddRange(keys);
                             }
                         }
@@ -156,65 +156,72 @@ namespace ZiView
 
                 UpdateImageDisplay();
 
-                if (_onnxSession == null && !string.IsNullOrEmpty(_config.SelectedModel))
+                if (!_config.EnableAiInference)
                 {
-                    WriteLog("Session missing on display. Attempting automatic reinit.");
-                    InitializeAi(_config.SelectedModel);
+                    StatusText.Text = "Mode: AI Disabled";
                 }
-
-                if (_onnxSession != null && _inputName != null)
+                else
                 {
-                    StatusText.Text = $"Processing... ({_activeEngineMode})";
-                    ShowAiProgressOsd();
-                    var progress = new Progress<(int done, int total)>(p => UpdateAiProgressOsd(p.done, p.total));
-                    var swTotal = System.Diagnostics.Stopwatch.StartNew();
-                    try
+                    if (_onnxSession == null && !string.IsNullOrEmpty(_config.SelectedModel))
                     {
-                        var inferenceTask = Task.Run(() => PerformAiTiled(_currentCombinedOriginal, token, progress), token);
-                        _currentInferenceTask = inferenceTask;
-
-                        // 30秒ごとに「まだ動いているか」をログへ出し、真のハングと単なる低速処理を切り分けやすくする
-                        while (true)
-                        {
-                            var completed = await Task.WhenAny(inferenceTask, Task.Delay(30000));
-                            if (completed == inferenceTask || token.IsCancellationRequested) break;
-                            WriteLog($"Still processing... elapsed {swTotal.Elapsed.TotalSeconds:F0}s (model: {_config.SelectedModel})");
-                        }
-
-                        _currentCombinedUpscaled = await inferenceTask;
-                        if (!token.IsCancellationRequested)
-                        {
-                            WriteLog($"AI processing completed in {swTotal.Elapsed.TotalSeconds:F1}s.");
-                            StatusText.Text = $"Mode: {_activeEngineMode}";
-                            UpdateImageDisplay();
-                        }
+                        WriteLog("Session missing on display. Attempting automatic reinit.");
+                        InitializeAi(_config.SelectedModel);
                     }
-                    catch (OperationCanceledException)
-                    {
-                        WriteLog($"AI processing cancelled after {swTotal.Elapsed.TotalSeconds:F1}s.");
-                    }
-                    catch (Exception ex)
-                    {
-                        WriteLog($"Runtime Kernel Error after {swTotal.Elapsed.TotalSeconds:F1}s (model: {_config.SelectedModel}): {ex}");
-                        StatusText.Text = "Mode: Error (see session.log)";
 
-                        string msg = ex.ToString();
-                        if (msg.Contains("CUBLAS", StringComparison.OrdinalIgnoreCase) ||
-                            msg.Contains("CUDA", StringComparison.OrdinalIgnoreCase) ||
-                            msg.Contains("CUDNN", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // GPUコンテキストが不安定化している可能性が高いため、
-                            // 汚染されたセッションを使い回さず次回アクセス時に再構築させる
-                            WriteLog("GPU runtime error detected. Disposing session to force clean reinit on next use.");
-                            _onnxSession?.Dispose();
-                            _onnxSession = null;
-                            _inputName = null;
-                        }
-                    }
-                    finally
+                    if (_onnxSession != null && _inputName != null)
                     {
-                        _currentInferenceTask = null;
-                        HideAiProgressOsd();
+                        StatusText.Text = $"Processing... ({_activeEngineMode})";
+                        ShowAiProgressOsd();
+                        var progress = new Progress<(int done, int total)>(p => UpdateAiProgressOsd(p.done, p.total));
+                        var swTotal = System.Diagnostics.Stopwatch.StartNew();
+                        try
+                        {
+                            var inferenceTask = Task.Run(() => PerformAiTiled(_currentCombinedOriginal, token, progress), token);
+                            _currentInferenceTask = inferenceTask;
+
+                            // 30秒ごとに「まだ動いているか」をログへ出し、真のハングと単なる低速処理を切り分けやすくする
+                            while (true)
+                            {
+                                var completed = await Task.WhenAny(inferenceTask, Task.Delay(30000));
+                                if (completed == inferenceTask || token.IsCancellationRequested) break;
+                                WriteLog($"Still processing... elapsed {swTotal.Elapsed.TotalSeconds:F0}s (model: {_config.SelectedModel})");
+                            }
+
+                            _currentCombinedUpscaled = await inferenceTask;
+                            if (!token.IsCancellationRequested)
+                            {
+                                WriteLog($"AI processing completed in {swTotal.Elapsed.TotalSeconds:F1}s.");
+                                StatusText.Text = $"Mode: {_activeEngineMode}";
+                                UpdateImageDisplay();
+                            }
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            WriteLog($"AI processing cancelled after {swTotal.Elapsed.TotalSeconds:F1}s.");
+                        }
+                        catch (Exception ex)
+                        {
+                            WriteLog($"Runtime Kernel Error after {swTotal.Elapsed.TotalSeconds:F1}s (model: {_config.SelectedModel}): {ex}");
+                            StatusText.Text = "Mode: Error (see session.log)";
+
+                            string msg = ex.ToString();
+                            if (msg.Contains("CUBLAS", StringComparison.OrdinalIgnoreCase) ||
+                                msg.Contains("CUDA", StringComparison.OrdinalIgnoreCase) ||
+                                msg.Contains("CUDNN", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // GPUコンテキストが不安定化している可能性が高いため、
+                                // 汚染されたセッションを使い回さず次回アクセス時に再構築させる
+                                WriteLog("GPU runtime error detected. Disposing session to force clean reinit on next use.");
+                                _onnxSession?.Dispose();
+                                _onnxSession = null;
+                                _inputName = null;
+                            }
+                        }
+                        finally
+                        {
+                            _currentInferenceTask = null;
+                            HideAiProgressOsd();
+                        }
                     }
                 }
             }
@@ -297,7 +304,7 @@ namespace ZiView
                 }
             }
             catch (Exception ex) { WriteLog($"CLI List Error: {ex.Message}"); }
-            return files.OrderBy(f => f).ToList();
+            return files.OrderBy(f => f, NaturalStringComparer.Instance).ToList();
         }
 
         private Mat LoadViaSystemCli(string archivePath, string entryKey)
@@ -482,7 +489,7 @@ namespace ZiView
                 .Where(f => f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
                             f.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) ||
                             f.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(f => f).ToList();
+                .OrderBy(f => f, NaturalStringComparer.Instance).ToList();
 
             int idx = archives.IndexOf(_currentSourcePath) + dir;
             if (idx >= 0 && idx < archives.Count)

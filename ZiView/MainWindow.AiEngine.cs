@@ -161,6 +161,17 @@ namespace ZiView
         };
 
         /// <summary>
+        /// ユーザーが設定ウィンドウで手動割り当てしたカテゴリ（あれば）を優先し、
+        /// 無ければ既定の自動分類(GetModelCategory)にフォールバックする。
+        /// </summary>
+        internal static string GetEffectiveModelCategory(AppConfig config, string fileName)
+        {
+            if (config.ModelCategoryOverrides.TryGetValue(fileName, out var overridden) && !string.IsNullOrWhiteSpace(overridden))
+                return overridden;
+            return GetModelCategory(fileName);
+        }
+
+        /// <summary>
         /// 設定された ModelFolder を絶対パスへ解決する。
         /// 空文字はプログラムルート（従来互換）、相対パスはルートからの相対、絶対パスはそのまま使用する。
         /// </summary>
@@ -250,7 +261,7 @@ namespace ZiView
                 }
 
                 _modelsByCategory = files
-                    .GroupBy(GetModelCategory)
+                    .GroupBy(f => GetEffectiveModelCategory(_config, f))
                     .OrderBy(g => g.Key == "その他" ? 1 : 0)
                     .ThenBy(g => g.Key)
                     .ToDictionary(g => g.Key, g => g.OrderBy(x => x).ToList());

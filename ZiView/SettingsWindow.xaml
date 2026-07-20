@@ -11,6 +11,7 @@
         <SolidColorBrush x:Key="AccentDimBrush" Color="#0F5C66"/>
         <SolidColorBrush x:Key="CardBrush" Color="#16161B"/>
         <SolidColorBrush x:Key="CardBorderBrush" Color="#232329"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#101014"/>
         <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F2F2F5"/>
         <SolidColorBrush x:Key="TextSecondaryBrush" Color="#8A8A93"/>
         <SolidColorBrush x:Key="TextCaptionBrush" Color="#6C6C76"/>
@@ -122,6 +123,95 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- ダークテーマのComboBox（OS標準の白背景を防止） -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Padding" Value="8,5"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="Toggle" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Focusable="False" ClickMode="Press" Background="Transparent" BorderThickness="0">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}"
+                                                BorderThickness="1" CornerRadius="6"/>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False" Margin="{TemplateBinding Padding}"
+                                              VerticalAlignment="Center" HorizontalAlignment="Left"
+                                              Content="{TemplateBinding SelectionBoxItem}"/>
+                            <TextBlock Text="▾" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right"
+                                       Margin="0,0,10,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                            <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource AccentBrush}"
+                                        BorderThickness="1" CornerRadius="6" MinWidth="{TemplateBinding ActualWidth}">
+                                    <ScrollViewer MaxHeight="220">
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ダークテーマのTabControl（OS標準タブの明色を防止） -->
+        <Style TargetType="TabItem">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="Bd" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource CardBorderBrush}"
+                                BorderThickness="1" CornerRadius="8,8,0,0" Margin="0,0,4,0" Padding="18,10">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentDimBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TabPanel Grid.Row="0" IsItemsHost="True" Margin="0,0,0,0"/>
+                            <Border Grid.Row="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}"
+                                    BorderThickness="1" CornerRadius="0,10,10,10" Padding="16">
+                                <ContentPresenter ContentSource="SelectedContent"/>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="20">
@@ -133,76 +223,137 @@
 
         <TextBlock Grid.Row="0" Text="設定" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,16"/>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel>
+        <TabControl Grid.Row="1">
 
-                <Border Style="{StaticResource CardPanel}">
+            <!-- ===== システム設定タブ：モデルパス・推論エンジン（スクロール無し） ===== -->
+            <TabItem Header="システム設定">
+                <StackPanel>
+                    <Border Style="{StaticResource CardPanel}">
+                        <StackPanel>
+                            <TextBlock Text="モデルフォルダ" Style="{StaticResource SectionLabel}"/>
+                            <TextBox x:Name="ModelFolderTextBox" IsReadOnly="True" TextWrapping="Wrap"
+                                     Background="#101014" Foreground="{StaticResource TextPrimaryBrush}"
+                                     BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                                     Padding="8" Margin="0,0,0,10"/>
+                            <Button Content="フォルダを選択..." HorizontalAlignment="Left" Click="BrowseModelFolder_Click"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardPanel}" Margin="0">
+                        <StackPanel>
+                            <TextBlock Text="推論エンジン" Style="{StaticResource SectionLabel}"/>
+                            <RadioButton x:Name="RadioTensorRt" GroupName="Engine" Content="TensorRT優先（TensorRT → CUDA → CPU）"/>
+                            <RadioButton x:Name="RadioCuda" GroupName="Engine" Content="CUDA優先（CUDA → CPUのみ）"/>
+
+                            <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
+
+                            <CheckBox x:Name="TrtCacheCheckBox" Content="TensorRTエンジンキャッシュを永続化する" Margin="0,0,0,4"/>
+                            <TextBlock Text="初回のみビルドで低速、2回目以降は同一モデル・同一環境なら高速起動になります。"
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="TrtCacheSizeText" Grid.Column="0" Text="キャッシュサイズ: 計算中..."
+                                           Foreground="{StaticResource TextCaptionBrush}" FontSize="11" VerticalAlignment="Center"/>
+                                <Button x:Name="ClearTrtCacheButton" Grid.Column="1" Content="キャッシュを削除" FontSize="11" Padding="10,5"
+                                        Click="ClearTrtCacheButton_Click"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </TabItem>
+
+            <!-- ===== AIモデル管理タブ：カテゴリ編集＋モデル割当（こちら側のみスクロール） ===== -->
+            <TabItem Header="AIモデル管理">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
-                        <TextBlock Text="モデルフォルダ" Style="{StaticResource SectionLabel}"/>
-                        <TextBox x:Name="ModelFolderTextBox" IsReadOnly="True" TextWrapping="Wrap"
-                                 Background="#101014" Foreground="{StaticResource TextPrimaryBrush}"
-                                 BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
-                                 Padding="8" Margin="0,0,0,10"/>
-                        <Button Content="フォルダを選択..." HorizontalAlignment="Left" Click="BrowseModelFolder_Click"/>
+
+                        <Border Style="{StaticResource CardPanel}">
+                            <StackPanel>
+                                <TextBlock Text="AIモデルカテゴリ編集" Style="{StaticResource SectionLabel}"/>
+                                <TextBlock Text="モデルの特性・用途を表すカテゴリを追加・削除できます。削除するとそのカテゴリのモデルは自動分類に戻ります。"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                                <ItemsControl x:Name="CategoryListControl">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,0,0,1" Padding="0,8">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="{Binding}" Foreground="{StaticResource TextPrimaryBrush}"
+                                                               FontSize="13" VerticalAlignment="Center"/>
+                                                    <Button Grid.Column="1" Content="削除" FontSize="11" Padding="10,4"
+                                                            Click="DeleteCategoryButton_Click"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="NewCategoryTextBox" Grid.Column="0" Margin="0,0,10,0"
+                                             Background="#101014" Foreground="{StaticResource TextPrimaryBrush}"
+                                             BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" Padding="8"/>
+                                    <Button Grid.Column="1" Content="カテゴリを追加" Click="AddCategoryButton_Click"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CardPanel}" Margin="0">
+                            <StackPanel>
+                                <TextBlock Text="AIモデル管理" Style="{StaticResource SectionLabel}"/>
+                                <TextBlock Text="各モデルのカテゴリ割当と、メイン画面の選択肢への表示（有効/無効）を設定します。"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                <ItemsControl x:Name="ModelListControl">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+
+                                                    <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                                                               Text="{Binding FileName}" Foreground="{StaticResource TextPrimaryBrush}"
+                                                               FontSize="13" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                                                    <ComboBox Grid.Row="1" Grid.Column="0"
+                                                              ItemsSource="{Binding DataContext.Categories, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                              SelectedItem="{Binding Category, Mode=TwoWay}"
+                                                              Margin="0,0,12,0" VerticalAlignment="Center"/>
+
+                                                    <CheckBox Grid.Row="1" Grid.Column="1" Content="有効"
+                                                              IsChecked="{Binding IsEnabled, Mode=TwoWay}" Margin="0" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock x:Name="EmptyListText" Text="モデルフォルダに .onnx ファイルが見つかりません。"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Visibility="Collapsed" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+
                     </StackPanel>
-                </Border>
+                </ScrollViewer>
+            </TabItem>
 
-                <Border Style="{StaticResource CardPanel}">
-                    <StackPanel>
-                        <TextBlock Text="推論エンジン" Style="{StaticResource SectionLabel}"/>
-                        <RadioButton x:Name="RadioTensorRt" GroupName="Engine" Content="TensorRT優先（TensorRT → CUDA → CPU）"/>
-                        <RadioButton x:Name="RadioCuda" GroupName="Engine" Content="CUDA優先（CUDA → CPUのみ）"/>
-
-                        <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
-
-                        <CheckBox x:Name="TrtCacheCheckBox" Content="TensorRTエンジンキャッシュを永続化する" Margin="0,0,0,4"/>
-                        <TextBlock Text="初回のみビルドで低速、2回目以降は同一モデル・同一環境なら高速起動になります。"
-                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
-
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="TrtCacheSizeText" Grid.Column="0" Text="キャッシュサイズ: 計算中..."
-                                       Foreground="{StaticResource TextCaptionBrush}" FontSize="11" VerticalAlignment="Center"/>
-                            <Button x:Name="ClearTrtCacheButton" Grid.Column="1" Content="キャッシュを削除" FontSize="11" Padding="10,5"
-                                    Click="ClearTrtCacheButton_Click"/>
-                        </Grid>
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource CardPanel}">
-                    <StackPanel>
-                        <TextBlock Text="AIモデル管理" Style="{StaticResource SectionLabel}"/>
-                        <TextBlock Text="無効にしたモデルはメイン画面の選択肢から除外されます。" Foreground="{StaticResource TextSecondaryBrush}"
-                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
-                        <ItemsControl x:Name="ModelListControl">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,0,0,1" Padding="0,10">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="13" TextWrapping="Wrap"/>
-                                                <TextBlock Text="{Binding Category}" Foreground="{StaticResource TextCaptionBrush}" FontSize="11" Margin="0,2,0,0"/>
-                                            </StackPanel>
-                                            <CheckBox Grid.Column="1" IsChecked="{Binding IsEnabled, Mode=TwoWay}" Margin="12,0,0,0" VerticalAlignment="Center"/>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <TextBlock x:Name="EmptyListText" Text="プログラムフォルダに .onnx ファイルが見つかりません。"
-                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Visibility="Collapsed" Margin="0,4,0,0"/>
-                    </StackPanel>
-                </Border>
-
-            </StackPanel>
-        </ScrollViewer>
+        </TabControl>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button Content="キャンセル" Click="CancelButton_Click" Margin="0,0,10,0"/>

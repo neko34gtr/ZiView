@@ -131,6 +131,7 @@ namespace ZiView
                 _config.CheckSpread = CheckSpread.IsChecked ?? true;
                 _config.CheckAutoDetect = CheckAutoDetect.IsChecked ?? false;
                 _config.CheckPrefetch = CheckPrefetch.IsChecked ?? true;
+                _config.EnableAiInference = CheckAiEnable.IsChecked ?? true;
                 _config.ShowReticle = CheckReticle.IsChecked ?? true;
                 _config.SplitSliderValue = SplitSlider.Value;
                 _config.LastSourcePath = _currentSourcePath ?? string.Empty;
@@ -168,6 +169,8 @@ namespace ZiView
             CheckAutoDetect.IsChecked = _config.CheckAutoDetect;
             CheckPrefetch.IsChecked = _config.CheckPrefetch;
             SplitSlider.Value = _config.SplitSliderValue;
+
+            CheckAiEnable.IsChecked = _config.EnableAiInference;
 
             CheckLens.IsChecked = _config.EnableLensCorrection;
             LensSlider.Value = _config.LensCorrectionAmount;

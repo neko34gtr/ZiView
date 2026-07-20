@@ -158,6 +158,27 @@ namespace ZiView
 
         private void OnSettingChanged(object sender, RoutedEventArgs e) => RefreshDisplay();
 
+        private void OnAiEnableChanged(object sender, RoutedEventArgs e)
+        {
+            _config.EnableAiInference = CheckAiEnable.IsChecked ?? true;
+            SaveConfig();
+
+            if (!_config.EnableAiInference)
+            {
+                // 実行中の推論を止め、即座に原寸画像へ戻す（再起動不要）
+                _cts?.Cancel();
+                _currentCombinedUpscaled?.Dispose();
+                _currentCombinedUpscaled = null;
+                StatusText.Text = "Mode: AI Disabled";
+                UpdateImageDisplay();
+            }
+            else if (_imageList.Count > 0)
+            {
+                // OFF→ONへ戻した際は現在ページを再変換して即座に反映する
+                RefreshDisplay();
+            }
+        }
+
         private void OnLensSettingChanged(object sender, RoutedEventArgs e)
         {
             _config.EnableLensCorrection = CheckLens.IsChecked ?? false;

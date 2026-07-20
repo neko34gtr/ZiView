@@ -27,6 +27,9 @@ namespace ZiView
         // 背景色の設定を保存するプロパティ（デフォルト: 真の黒）
         public string BackgroundColor { get; set; } = "#000000";
 
+        // AI推論の有効/無効（リアルタイム切替。OFF時は原寸画像をそのまま表示する）
+        public bool EnableAiInference { get; set; } = true;
+
         // 選択中のAIモデルファイル名（プログラムルート直下の *.onnx）
         public string SelectedModel { get; set; } = "RealESRGAN_x4plus_anime_6B.onnx";
 
@@ -41,7 +44,15 @@ namespace ZiView
 
         // AIモデル(*.onnx)を探すフォルダ。空文字はプログラムルート（従来互換）。
         // 相対パスの場合はプログラムルートからの相対、絶対パスならそのまま使用する。
-        public string ModelFolder { get; set; } = "";
+        // 既定値はプログラムルート直下の .\model フォルダ。
+        public string ModelFolder { get; set; } = @".\model";
+
+        // ユーザーが設定ウィンドウで手動割り当てしたモデルのカテゴリ（ファイル名 → カテゴリ名）。
+        // 既定の自動分類（GetModelCategory）と異なる場合のみ差分として保存される。
+        public Dictionary<string, string> ModelCategoryOverrides { get; set; } = new();
+
+        // ユーザーが作成したカスタムカテゴリ名（現在モデルが1つも割り当てられていないものも保持するため）。
+        public List<string> CustomCategories { get; set; } = new();
 
         // TensorRTのエンジンキャッシュ(ビルド済み最適化エンジン)をディスクへ永続化するか。
         // ONにすると初回のみ低速（エンジンビルド）、2回目以降は大幅に高速化される。
