@@ -156,12 +156,18 @@ namespace ZiView
             }
         }
 
-        private void OnSettingChanged(object sender, RoutedEventArgs e) => RefreshDisplay();
+        private void OnSettingChanged(object sender, RoutedEventArgs e)
+        {
+            // 見開き/自動判定はページの合成結果そのものを変えるため、先読み済みキャッシュは無効
+            ClearPageCache();
+            RefreshDisplay();
+        }
 
         private void OnAiEnableChanged(object sender, RoutedEventArgs e)
         {
             _config.EnableAiInference = CheckAiEnable.IsChecked ?? true;
             SaveConfig();
+            ClearPageCache(); // ON/OFFでキャッシュ内容（AI適用有無）の前提が変わるため破棄する
 
             if (!_config.EnableAiInference)
             {

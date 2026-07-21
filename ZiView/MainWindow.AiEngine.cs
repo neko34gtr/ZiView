@@ -316,6 +316,7 @@ namespace ZiView
             // 実行中の推論を止め、_onnxSessionへのアクセスが完全に終わるまで待つ
             // （待機自体はawaitのためUIスレッドはブロックされない）
             _cts?.Cancel();
+            ClearPageCache(); // 先読みキャッシュはモデル切替前のAI推論結果を保持しているため無効化する
             var runningTask = _currentInferenceTask;
             if (runningTask != null)
             {

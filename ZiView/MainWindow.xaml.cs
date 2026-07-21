@@ -66,7 +66,7 @@ namespace ZiView
                 ApplyConfigToUi();
                 if (!string.IsNullOrEmpty(_currentSourcePath))
                 {
-                    LoadSource(_currentSourcePath);
+                    _ = LoadSource(_currentSourcePath);
                 }
 
                 // 設定から読み込んだ背景色（_config.BackgroundColor）を反映し、カラーピッカーの状態を同期する
@@ -149,6 +149,7 @@ namespace ZiView
         {
             SaveConfig();
             WriteLog("Cleaning up resources.");
+            ClearPageCache();
             _onnxSession?.Dispose();
             _currentCombinedOriginal?.Dispose();
             _currentCombinedUpscaled?.Dispose();
@@ -206,7 +207,7 @@ namespace ZiView
             this.Drop += (s, e) =>
             {
                 string[]? files = e.Data.GetData(DataFormats.FileDrop) as string[];
-                if (files?.Length > 0) LoadSource(files[0]);
+                if (files?.Length > 0) _ = LoadSource(files[0]);
             };
 
             PageSlider.ValueChanged += (s, e) =>
