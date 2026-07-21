@@ -16,6 +16,10 @@ namespace ZiView
         public bool CheckAutoDetectOrder { get; set; } = false; // プロパティ名修正等の不整合防止
         public bool CheckAutoDetect { get; set; } = false;
         public bool CheckPrefetch { get; set; } = false;
+
+        // AI先読みを行う先方向のページ数（1〜5）。値が大きいほどページ送りは速くなるが、
+        // 先読み中のGPU/CPU負荷とキャッシュ保持分のメモリ使用量（原寸+AI適用後の両方）が増える。
+        public int PrefetchPageCount { get; set; } = 1;
         public double SplitSliderValue { get; set; } = 100;
         public string LastSourcePath { get; set; } = string.Empty;
 

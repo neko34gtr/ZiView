@@ -185,6 +185,26 @@ namespace ZiView
             }
         }
 
+        private void OnPrefetchToggleChanged(object sender, RoutedEventArgs e)
+        {
+            _config.CheckPrefetch = CheckPrefetch.IsChecked ?? false;
+            SaveConfig();
+            if (!_config.CheckPrefetch) ClearPageCache(); // OFF時は保持している先読み分を即座に解放する
+        }
+
+        private void OnPrefetchCountChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            // Minimum=1に対し既定Value=0からの自動補正で、InitializeComponent中（PrefetchCountText生成前）に
+            // ValueChangedが先行発火することがあるため、未初期化の間は何もしない
+            if (PrefetchCountText == null) return;
+
+            int count = (int)PrefetchCountSlider.Value;
+            _config.PrefetchPageCount = count;
+            PrefetchCountText.Text = $"{count}ページ先読み";
+            SaveConfig();
+            ClearPageCache(); // 先読み件数の変更に伴い、既存キャッシュの前提（件数）が崩れるため破棄する
+        }
+
         private void OnLensSettingChanged(object sender, RoutedEventArgs e)
         {
             _config.EnableLensCorrection = CheckLens.IsChecked ?? false;

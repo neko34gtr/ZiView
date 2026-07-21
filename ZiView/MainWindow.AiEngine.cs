@@ -511,7 +511,8 @@ namespace ZiView
                     _tileInputBufferFp16 = new Float16[required];
                 }
                 var data16 = _tileInputBufferFp16;
-                for (int y = 0; y < h; y++)
+                // 各yは書き込み先が完全に独立しているため、行単位の並列化で安全に高速化できる
+                Parallel.For(0, h, y =>
                 {
                     for (int x = 0; x < w; x++)
                     {
@@ -520,7 +521,7 @@ namespace ZiView
                         data16[1 * w * h + y * w + x] = (Float16)(v.Item1 / 255f);
                         data16[2 * w * h + y * w + x] = (Float16)(v.Item2 / 255f);
                     }
-                }
+                });
                 var tensor16 = required == data16.Length
                     ? new DenseTensor<Float16>(data16, new[] { 1, 3, h, w })
                     : new DenseTensor<Float16>(new Memory<Float16>(data16, 0, required), new[] { 1, 3, h, w });
@@ -533,7 +534,7 @@ namespace ZiView
                     _tileInputBuffer = new float[required];
                 }
                 var data = _tileInputBuffer;
-                for (int y = 0; y < h; y++)
+                Parallel.For(0, h, y =>
                 {
                     for (int x = 0; x < w; x++)
                     {
@@ -542,7 +543,7 @@ namespace ZiView
                         data[1 * w * h + y * w + x] = v.Item1 / 255f;
                         data[2 * w * h + y * w + x] = v.Item2 / 255f;
                     }
-                }
+                });
                 // バッファを使い回すため、テンソルには実サイズ分だけを渡す（末尾の余剰領域は無視される）
                 var tensor = required == data.Length
                     ? new DenseTensor<float>(data, new[] { 1, 3, h, w })
@@ -563,7 +564,7 @@ namespace ZiView
                 outW = output16.Dimensions[3];
                 res = new Mat(outH, outW, MatType.CV_8UC3);
                 var resIdx16 = res.GetUnsafeGenericIndexer<Vec3b>();
-                for (int y = 0; y < outH; y++)
+                Parallel.For(0, outH, y =>
                 {
                     for (int x = 0; x < outW; x++)
                     {
@@ -573,7 +574,7 @@ namespace ZiView
                             (byte)Math.Clamp((float)output16[0, 0, y, x] * 255, 0, 255)
                         );
                     }
-                }
+                });
                 return res;
             }
 
@@ -585,7 +586,7 @@ namespace ZiView
 
             res = new Mat(outH, outW, MatType.CV_8UC3);
             var resIdx = res.GetUnsafeGenericIndexer<Vec3b>();
-            for (int y = 0; y < outH; y++)
+            Parallel.For(0, outH, y =>
             {
                 for (int x = 0; x < outW; x++)
                 {
@@ -595,7 +596,7 @@ namespace ZiView
                         (byte)Math.Clamp(output[0, 0, y, x] * 255, 0, 255)
                     );
                 }
-            }
+            });
             return res;
         }
     }

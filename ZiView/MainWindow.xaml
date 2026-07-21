@@ -345,7 +345,18 @@
                             <CheckBox x:Name="CheckSpread" Content="見開き表示（右開き）" IsChecked="False" Click="OnSettingChanged"/>
                             <CheckBox x:Name="CheckAutoDetect" Content="ページ順の自動判定" IsChecked="False" Click="OnSettingChanged"/>
                             <CheckBox x:Name="CheckReticle" Content="レティクル表示" IsChecked="False" Click="OnReticleSettingChanged"/>
-                            <CheckBox x:Name="CheckPrefetch" Content="AI先読み" IsChecked="True"/>
+                            <CheckBox x:Name="CheckPrefetch" Content="AI先読み" IsChecked="True" Click="OnPrefetchToggleChanged"/>
+                            <Grid Margin="0,0,0,14" IsEnabled="{Binding IsChecked, ElementName=CheckPrefetch}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Slider x:Name="PrefetchCountSlider" Grid.Column="0" Minimum="1" Maximum="5" Value="1"
+                                        TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnPrefetchCountChanged"/>
+                                <TextBlock x:Name="PrefetchCountText" Grid.Column="1" Text="1先読み"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
+                                           Margin="10,0,0,0" VerticalAlignment="Center"/>
+                            </Grid>
                             <TextBlock Text="AI進捗OSDの表示位置" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,6"/>
                             <ComboBox x:Name="AiOsdPositionComboBox" SelectionChanged="AiOsdPositionComboBox_SelectionChanged"/>
                         </StackPanel>

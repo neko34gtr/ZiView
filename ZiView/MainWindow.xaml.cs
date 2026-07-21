@@ -131,6 +131,7 @@ namespace ZiView
                 _config.CheckSpread = CheckSpread.IsChecked ?? true;
                 _config.CheckAutoDetect = CheckAutoDetect.IsChecked ?? false;
                 _config.CheckPrefetch = CheckPrefetch.IsChecked ?? true;
+                _config.PrefetchPageCount = (int)PrefetchCountSlider.Value;
                 _config.EnableAiInference = CheckAiEnable.IsChecked ?? true;
                 _config.ShowReticle = CheckReticle.IsChecked ?? true;
                 _config.SplitSliderValue = SplitSlider.Value;
@@ -150,6 +151,7 @@ namespace ZiView
             SaveConfig();
             WriteLog("Cleaning up resources.");
             ClearPageCache();
+            CloseOpenZip();
             _onnxSession?.Dispose();
             _currentCombinedOriginal?.Dispose();
             _currentCombinedUpscaled?.Dispose();
@@ -172,6 +174,10 @@ namespace ZiView
             SplitSlider.Value = _config.SplitSliderValue;
 
             CheckAiEnable.IsChecked = _config.EnableAiInference;
+
+            int prefetchCount = Math.Clamp(_config.PrefetchPageCount, 1, 5);
+            PrefetchCountSlider.Value = prefetchCount;
+            PrefetchCountText.Text = $"{prefetchCount}ページ先読み";
 
             CheckLens.IsChecked = _config.EnableLensCorrection;
             LensSlider.Value = _config.LensCorrectionAmount;

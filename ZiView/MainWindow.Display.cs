@@ -49,6 +49,21 @@ namespace ZiView
             _pageCache.Clear();
         }
 
+        // 現在のソースがzipの場合、ページ送りのたびに開き直さずこのハンドルを使い回す
+        private ZipArchive? _openZipArchive;
+        private FileStream? _openZipStream;
+
+        /// <summary>
+        /// 開いたままのzipハンドルを解放する。ソース切替時・終了時に必ず呼び出すこと。
+        /// </summary>
+        private void CloseOpenZip()
+        {
+            _openZipArchive?.Dispose();
+            _openZipArchive = null;
+            _openZipStream?.Dispose();
+            _openZipStream = null;
+        }
+
 
         public async Task LoadSource(string path)
         {
@@ -56,6 +71,7 @@ namespace ZiView
 
             _cts?.Cancel();
             ClearPageCache();
+            CloseOpenZip();
 
             _currentSourcePath = path;
             _imageList.Clear();
@@ -96,15 +112,16 @@ namespace ZiView
                         string ext = Path.GetExtension(path).ToLower(CultureInfo.InvariantCulture);
                         if (ext == ".zip")
                         {
-                            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-                            using (ZipArchive archive = new ZipArchive(fs, ZipArchiveMode.Read))
-                            {
-                                var keys = archive.Entries
-                                    .Where(e => !string.IsNullOrEmpty(e.FullName) && IsImageFile(e.FullName))
-                                    .Select(e => e.FullName)
-                                    .OrderBy(k => k, NaturalStringComparer.Instance);
-                                _imageList.AddRange(keys);
-                            }
+                            // ページ送りのたびにFileStream/ZipArchiveを開き直していたのをやめ、
+                            // このソースを閉じるまで開いたまま保持して使い回す（I/O削減）
+                            _openZipStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                            _openZipArchive = new ZipArchive(_openZipStream, ZipArchiveMode.Read);
+
+                            var keys = _openZipArchive.Entries
+                                .Where(e => !string.IsNullOrEmpty(e.FullName) && IsImageFile(e.FullName))
+                                .Select(e => e.FullName)
+                                .OrderBy(k => k, NaturalStringComparer.Instance);
+                            _imageList.AddRange(keys);
                         }
                         else if (ext == ".rar" || ext == ".7z")
                         {
@@ -293,13 +310,13 @@ namespace ZiView
                     }
                 }
 
-                // 現在ページの表示が完了した直後、AI先読みが有効な場合のみ次ページを裏で1件だけ準備しておく
+                // 現在ページの表示が完了した直後、AI先読みが有効な場合のみ次ページ以降を裏で準備しておく
                 if (CheckPrefetch.IsChecked == true && !token.IsCancellationRequested)
                 {
                     int step = (CheckSpread.IsChecked == true) ? 2 : 1;
-                    int nextIndex = index + step;
+                    int count = Math.Clamp(_config.PrefetchPageCount, 1, 5);
                     _prefetchCts = new CancellationTokenSource();
-                    _prefetchTask = PrefetchPageAsync(nextIndex, _prefetchCts.Token);
+                    _prefetchTask = PrefetchAheadAsync(index + step, step, count, _prefetchCts.Token);
                 }
             }
             catch (OperationCanceledException)
@@ -326,11 +343,28 @@ namespace ZiView
         }
 
         /// <summary>
-        /// 「AI先読み」有効時に、現在ページの表示完了後バックグラウンドで次ページを事前デコード・
-        /// 事前AI推論しておく。結果は_pageCacheへ格納し、実際にそのページへ遷移した際は
-        /// デコード・推論を丸ごとスキップして即座に表示できるようにする。
+        /// 先読み設定件数(count)ぶん、startIndexからstepおきに順番に先読みしていく。
+        /// GPU/推論セッションへの負荷を予測しやすくするため、あえて並列化せず1ページずつ逐次実行する。
+        /// 既にキャッシュ済み・範囲外のページはスキップする。
         /// </summary>
-        private async Task PrefetchPageAsync(int index, CancellationToken token)
+        private async Task PrefetchAheadAsync(int startIndex, int step, int count, CancellationToken token)
+        {
+            int idx = startIndex;
+            for (int i = 0; i < count; i++)
+            {
+                if (token.IsCancellationRequested) return;
+                if (idx < 0 || idx >= _imageList.Count) break;
+                await PrefetchOnePageAsync(idx, token);
+                idx += step;
+            }
+        }
+
+        /// <summary>
+        /// 「AI先読み」有効時に、1ページ分だけバックグラウンドで事前デコード・事前AI推論しておく。
+        /// 結果は_pageCacheへ格納し、実際にそのページへ遷移した際はデコード・推論を丸ごとスキップして
+        /// 即座に表示できるようにする。
+        /// </summary>
+        private async Task PrefetchOnePageAsync(int index, CancellationToken token)
         {
             if (index < 0 || index >= _imageList.Count) return;
             if (_pageCache.ContainsKey(index)) return;
@@ -390,20 +424,16 @@ namespace ZiView
             }
 
             string ext = Path.GetExtension(_currentSourcePath ?? "").ToLower(CultureInfo.InvariantCulture);
-            if (ext == ".zip")
+            if (ext == ".zip" && _openZipArchive != null)
             {
-                using (FileStream fs = new FileStream(_currentSourcePath!, FileMode.Open, FileAccess.Read, FileShare.Read))
-                using (ZipArchive archive = new ZipArchive(fs, ZipArchiveMode.Read))
+                ZipArchiveEntry? entry = _openZipArchive.GetEntry(key);
+                if (entry != null)
                 {
-                    ZipArchiveEntry? entry = archive.GetEntry(key);
-                    if (entry != null)
+                    using (Stream entryStream = entry.Open())
+                    using (MemoryStream ms = new MemoryStream())
                     {
-                        using (Stream entryStream = entry.Open())
-                        using (MemoryStream ms = new MemoryStream())
-                        {
-                            entryStream.CopyTo(ms);
-                            return Cv2.ImDecode(ms.ToArray(), ImreadModes.Color);
-                        }
+                        entryStream.CopyTo(ms);
+                        return Cv2.ImDecode(ms.ToArray(), ImreadModes.Color);
                     }
                 }
             }
