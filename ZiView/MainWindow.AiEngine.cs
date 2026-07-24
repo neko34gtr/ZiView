@@ -139,12 +139,40 @@ namespace ZiView
 
                 StatusText.Text = $"Mode: {_activeEngineMode}";
                 WriteLog($"Inference Session context bound. Input: {_inputName}");
+
+                // 初回のGPU/TensorRT初期化遅延を起動時に消化しておく
+                WarmupEngine();
             }
             catch (Exception ex)
             {
                 _activeEngineMode = "Error";
                 StatusText.Text = $"AI Init Error";
                 WriteLog($"CRITICAL ENGINE ABEND: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// AIモデル構築直後にダミー画像を用いて1回推論を実行し、
+        /// TensorRT / GPU の初回ウォームアップ（VRAM確保・カーネル準備）を事前に消化する。
+        /// </summary>
+        private void WarmupEngine()
+        {
+            if (_onnxSession == null || string.IsNullOrEmpty(_inputName)) return;
+
+            try
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                int sz = _fixedInputSize ?? (GetTileSizeForModel(_config.SelectedModel) + 16);
+
+                // 固定サイズ（または標準272x272）の黒画像を生成して既存のProcessTileを通す
+                using var dummyMat = new Mat(sz, sz, MatType.CV_8UC3, Scalar.All(0));
+                using var resultMat = ProcessTile(dummyMat);
+
+                WriteLog($"[AI] Engine warmup complete in {sw.Elapsed.TotalMilliseconds:F0}ms.");
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"[AI] Engine warmup skipped/failed: {ex.Message}");
             }
         }
 
@@ -408,10 +436,11 @@ namespace ZiView
             // 最初のタイルを実際に推論し、出力テンソルの実寸からスケール倍率を算出する
             // （1x/2x/3x/4x等、モデルごとに異なるため決め打ちにしない）
             var swProbe = System.Diagnostics.Stopwatch.StartNew();
-            int probeCw = Math.Min(tileSize + overlap, inWidth);
-            int probeCh = Math.Min(tileSize + overlap, inHeight);
-            int probeTargetW = GetPaddedTargetSize(probeCw);
-            int probeTargetH = GetPaddedTargetSize(probeCh);
+            int standardTileSize = tileSize + overlap; // 入力サイズを常にこのサイズに完全固定化する(実験)
+            int probeCw = Math.Min(standardTileSize, inWidth);
+            int probeCh = Math.Min(standardTileSize, inHeight);
+            int probeTargetW = _fixedInputSize ?? standardTileSize;
+            int probeTargetH = _fixedInputSize ?? standardTileSize;
 
             Mat probeResult;
             using (var probeCrop = new Mat(input, new OpenCvSharp.Rect(0, 0, probeCw, probeCh)))
@@ -453,8 +482,8 @@ namespace ZiView
 
                     int cw = Math.Min(tileSize + overlap, inWidth - x);
                     int ch = Math.Min(tileSize + overlap, inHeight - y);
-                    int targetW = GetPaddedTargetSize(cw);
-                    int targetH = GetPaddedTargetSize(ch);
+                    int targetW = _fixedInputSize ?? standardTileSize;
+                    int targetH = _fixedInputSize ?? standardTileSize;
 
                     swTile.Restart();
                     Mat up;
