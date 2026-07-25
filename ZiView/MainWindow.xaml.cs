@@ -76,6 +76,9 @@ namespace ZiView
             this.Loaded += async (s, e) =>
             {
                 ScanOnnxModels();
+                // PC再起動等でRAMDISKが消えていた場合、SSD側の退避キャッシュから復元する
+                // （TensorRT再ビルドの数十秒コストを避けるため。RAMDISK運用でない場合は自動的に何もしない）
+                RestoreTrtCacheFromBackupIfNeeded();
                 // TensorRT構築・ウォームアップは重いため、オーバーレイ表示＋バックグラウンド実行にして
                 // UIスレッドの応答なし（白画面）状態を回避する
                 await InitializeAiWithOverlayAsync(_config.SelectedModel);
@@ -229,6 +232,8 @@ namespace ZiView
         {
             SaveConfig();
             WriteLog("Cleaning up resources.");
+            // RAMDISK運用時のみ、正常終了時にSSD側へtrt_cacheを退避する
+            BackupTrtCacheToSsd();
             ClearPageCache();
             CloseOpenZip();
             _onnxSession?.Dispose();

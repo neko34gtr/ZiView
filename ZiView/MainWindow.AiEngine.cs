@@ -26,9 +26,12 @@ namespace ZiView
         private bool _isUpdatingModelComboInternal = false;
         private string _activeEngineMode = "Unknown";
 
-        // 全画面一括推論の適用条件（4K以下・空きVRAM6GB以上ならタイル分割を回避）
+        // 全画面一括推論の適用条件（4K以下・空きVRAM1.5GB以上ならタイル分割を回避）
+        // ※画像1枚分の入出力テンソル＋中間特徴マップの実所要量は軽量モデルなら数百MB〜1GB程度。
+        //   6GBはTensorRTコンテキスト常駐分（数GB）を考慮しない過剰に安全側の値だったため引き下げた。
+        //   万一不足していてもTryFullFrame側のtry/catchでタイル分割へ自動フォールバックするため安全。
         private const int FullFrameMaxLongSidePx = 3840;
-        private const long FullFrameMinFreeVramMB = 6000;
+        private const long FullFrameMinFreeVramMB = 1536;
         // タイルバッチ推論の1回あたり最大タイル数（TensorRT Dynamic Batch Opt=35を想定）
         private const int TileBatchSize = 35;
 
@@ -338,6 +341,148 @@ namespace ZiView
             catch { }
 
             return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trt_cache");
+        }
+
+        // SSD側の退避先（プログラムルート直下・固定）。RAMDISK運用時のみ実際に使われる。
+        private static string GetTrtCacheBackupDirectory()
+            => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trt_cache_backup");
+
+        private const long CacheSyncMinFreeBytes = 512L * 1024 * 1024; // 512MB
+
+        /// <summary>
+        /// パスが指すドライブがRAMDISK（DriveType.Ram）かどうかを自動判定する。
+        /// ドライブレターだけでは判別できないため、DriveInfoのDriveTypeで判定する。
+        /// 一部のRAMDISKドライバはFixed扱いで報告してくることがあり、その場合は誤ってfalseになる
+        /// （＝同期をスキップするだけで安全側に倒れる。手動フラグでの上書きが必要ならSettings側の対応が別途必要）。
+        /// </summary>
+        private static bool IsRamDisk(string path)
+        {
+            try
+            {
+                string? root = Path.GetPathRoot(Path.GetFullPath(path));
+                if (string.IsNullOrEmpty(root)) return false;
+                var drive = new DriveInfo(root);
+                return drive.IsReady && drive.DriveType == DriveType.Ram;
+            }
+            catch { return false; }
+        }
+
+        private static long GetFreeBytesForPath(string path)
+        {
+            try
+            {
+                string? root = Path.GetPathRoot(Path.GetFullPath(path));
+                if (string.IsNullOrEmpty(root)) return -1;
+                return new DriveInfo(root).AvailableFreeSpace;
+            }
+            catch { return -1; }
+        }
+
+        /// <summary>
+        /// srcDir配下の全ファイルをdstDirへ相対パスを保ったままファイル単位で上書きコピーする。
+        /// ディレクトリ丸ごと削除・差し替えは行わない（誤動作時に意図しないフォルダを消す事故を避けるため）。
+        /// </summary>
+        private static int CopyDirectoryFiles(string srcDir, string dstDir)
+        {
+            int count = 0;
+            foreach (var srcFile in Directory.EnumerateFiles(srcDir, "*", SearchOption.AllDirectories))
+            {
+                string rel = Path.GetRelativePath(srcDir, srcFile);
+                string dstFile = Path.Combine(dstDir, rel);
+                string? dstFileDir = Path.GetDirectoryName(dstFile);
+                if (!string.IsNullOrEmpty(dstFileDir)) Directory.CreateDirectory(dstFileDir);
+                File.Copy(srcFile, dstFile, overwrite: true);
+                count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// 起動時（InitializeAiの前）に呼ぶ。TensorRTキャッシュ先がRAMDISKで、かつ中身が空
+        /// （PC再起動でRAMDISKが消えた状態）の場合のみ、SSD側の退避フォルダから復元する。
+        /// RAMDISK側の空き容量が「復元に必要なサイズ+512MB」未満なら安全側でスキップする。
+        /// </summary>
+        private void RestoreTrtCacheFromBackupIfNeeded()
+        {
+            try
+            {
+                string liveCacheDir = GetTensorRtCacheDirectory(_config.TensorRtCacheDirectory);
+                if (!IsRamDisk(liveCacheDir))
+                {
+                    WriteLog("[Cache] TRT cache is not on a RAM disk; skip restore/backup sync.");
+                    return;
+                }
+
+                bool liveHasFiles = Directory.Exists(liveCacheDir)
+                    && Directory.EnumerateFiles(liveCacheDir, "*", SearchOption.AllDirectories).Any();
+                if (liveHasFiles)
+                {
+                    WriteLog("[Cache] RAM disk TRT cache already present; no restore needed.");
+                    return;
+                }
+
+                string backupDir = GetTrtCacheBackupDirectory();
+                if (!Directory.Exists(backupDir)
+                    || !Directory.EnumerateFiles(backupDir, "*", SearchOption.AllDirectories).Any())
+                {
+                    WriteLog("[Cache] No SSD backup TRT cache found; will build fresh.");
+                    return;
+                }
+
+                long backupSize = new DirectoryInfo(backupDir)
+                    .EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+                long freeOnRamDisk = GetFreeBytesForPath(liveCacheDir);
+                if (freeOnRamDisk >= 0 && freeOnRamDisk < backupSize + CacheSyncMinFreeBytes)
+                {
+                    WriteLog($"[Cache] RAM disk free space insufficient for restore " +
+                             $"({freeOnRamDisk / 1024 / 1024}MB free, need {(backupSize + CacheSyncMinFreeBytes) / 1024 / 1024}MB). Skipping.");
+                    return;
+                }
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                Directory.CreateDirectory(liveCacheDir);
+                int copied = CopyDirectoryFiles(backupDir, liveCacheDir);
+                WriteLog($"[Cache] Restored {copied} TRT cache file(s) from SSD backup to RAM disk in {sw.Elapsed.TotalMilliseconds:F0}ms.");
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"[Cache] TRT cache restore failed (continuing without it): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 終了時（Window_Closing）に呼ぶ。TensorRTキャッシュ先がRAMDISKの場合のみ、
+        /// SSD側の退避フォルダへファイル単位で上書き同期する。SSD側の空き容量が
+        /// 「退避に必要なサイズ+512MB」未満なら安全側でスキップする。
+        /// </summary>
+        private void BackupTrtCacheToSsd()
+        {
+            try
+            {
+                string liveCacheDir = GetTensorRtCacheDirectory(_config.TensorRtCacheDirectory);
+                if (!IsRamDisk(liveCacheDir)) return; // RAMDISK運用時のみ退避が必要
+
+                if (!Directory.Exists(liveCacheDir)) return;
+                var liveFiles = Directory.EnumerateFiles(liveCacheDir, "*", SearchOption.AllDirectories).ToList();
+                if (liveFiles.Count == 0) return;
+
+                string backupDir = GetTrtCacheBackupDirectory();
+                long liveSize = liveFiles.Sum(f => new FileInfo(f).Length);
+                long freeOnSsd = GetFreeBytesForPath(backupDir);
+                if (freeOnSsd >= 0 && freeOnSsd < liveSize + CacheSyncMinFreeBytes)
+                {
+                    WriteLog($"[Cache] SSD free space insufficient for backup ({freeOnSsd / 1024 / 1024}MB free). Skipping.");
+                    return;
+                }
+
+                Directory.CreateDirectory(backupDir);
+                int copied = CopyDirectoryFiles(liveCacheDir, backupDir);
+                WriteLog($"[Cache] Backed up {copied} TRT cache file(s) from RAM disk to SSD.");
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"[Cache] TRT cache backup failed: {ex.Message}");
+            }
         }
 
         internal static string GetModelCategory(string fileName)
