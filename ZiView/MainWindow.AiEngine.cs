@@ -232,11 +232,36 @@ namespace ZiView
         }
 
         /// <summary>
-        /// TensorRTエンジンキャッシュの保存先。プログラムルート直下の固定フォルダとし、
-        /// ModelFolderの変更に影響されないようにする。
+        /// TensorRTエンジンキャッシュの保存先。
+        /// RAMディスクが存在する場合は優先して使用し、存在しない場合はプログラムルート直下を使用する。
         /// </summary>
-        internal static string GetTensorRtCacheDirectory() =>
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trt_cache");
+        internal static string GetTensorRtCacheDirectory()
+        {
+            // RAMディスク上の出力先（環境に合わせてドライブ文字を変更）
+            string ramdiskDir = @"X:\temp\ZView\trt_cache";
+
+            string targetDir;
+
+            // RAMディスク（ドライブ）が存在するかチェック
+            string? root = Path.GetPathRoot(ramdiskDir);
+            if (!string.IsNullOrEmpty(root) && Directory.Exists(root))
+            {
+                targetDir = ramdiskDir;
+            }
+            else
+            {
+                // ドライブがない場合のフォールバック（プログラムルート直下）
+                targetDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trt_cache");
+            }
+
+            // ディレクトリが存在しなければ作成しておく
+            if (!Directory.Exists(targetDir))
+            {
+                Directory.CreateDirectory(targetDir);
+            }
+
+            return targetDir;
+        }
 
         internal static string GetModelCategory(string fileName)
         {
@@ -492,6 +517,7 @@ namespace ZiView
 
             int tileIndex = 0;
             var swTile = System.Diagnostics.Stopwatch.StartNew();
+            var swLogThrottle = System.Diagnostics.Stopwatch.StartNew(); // タイル毎ログの間引き用（一定時間おきのみ出力）
 
             for (int y = 0; y < inHeight; y += tileSize)
             {
@@ -513,8 +539,15 @@ namespace ZiView
                     {
                         up = ProcessTile(padded);
                     }
-                    WriteLog($"[AI] Tile {tileIndex}/{totalTiles} (x={x},y={y},{cw}x{ch} padded->{targetW}x{targetH}) " +
-                             $"-> {up.Width}x{up.Height} in {swTile.Elapsed.TotalMilliseconds:F0}ms");
+                    // タイル数分毎回ログを出すとI/Oが無視できないオーバーヘッドになるため、
+                    // 約300msおき＋最終タイルのみに間引く（進捗OSD自体は毎回更新するので体感には影響しない）
+                    bool isLastTile = tileIndex == totalTiles;
+                    if (isLastTile || swLogThrottle.Elapsed.TotalMilliseconds >= 300)
+                    {
+                        WriteLog($"[AI] Tile {tileIndex}/{totalTiles} (x={x},y={y},{cw}x{ch} padded->{targetW}x{targetH}) " +
+                                 $"-> {up.Width}x{up.Height} in {swTile.Elapsed.TotalMilliseconds:F0}ms");
+                        swLogThrottle.Restart();
+                    }
                     progress?.Report((tileIndex, totalTiles));
 
                     token.ThrowIfCancellationRequested();

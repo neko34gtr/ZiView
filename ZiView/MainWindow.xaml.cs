@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
@@ -29,7 +30,18 @@ namespace ZiView
 
         // パス定義
         private readonly string _configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "zi_view_config.json");
-        private readonly string _logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "session.log");
+
+        // ログ出力先: RAMDISK（X:\temp\ZView）が使えればそちらへ書き込みSSDへの書き込みを避ける。
+        // 使えない場合（ドライブ非存在・書き込み不可等）は従来通りプログラムルート直下へフォールバックする。
+        private readonly string _logPath = ResolveLogPath();
+
+        // ログ書き込みを非同期化するための一本化されたチャンネル。
+        // 呼び出し側（AI推論スレッド含む）はキューへ積むだけで即座に戻り、
+        // 実際のファイルI/Oはバックグラウンドの専用タスクが引き受ける（開閉コストも呼び出し毎に発生させない）。
+        private readonly Channel<string> _logChannel = Channel.CreateUnbounded<string>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+        private StreamWriter? _logWriter;
+        private Task? _logWriterTask;
 
         private AppConfig _config = new();
         private CancellationTokenSource? _cts;
@@ -84,18 +96,65 @@ namespace ZiView
             SetupEvents();
         }
 
-        private void InitLog()
+        /// <summary>
+        /// ログ出力先を決定する。X:ドライブ（RAMDISK運用を想定）が存在し実際に書き込める場合は
+        /// X:\temp\ZView\session.log を使い、SSDへの書き込みを避ける。それ以外は従来通り
+        /// プログラムルート直下へフォールバックする。
+        /// </summary>
+        private static string ResolveLogPath()
         {
-            try { File.WriteAllText(_logPath, $"=== Session Started at {DateTime.Now} ===\n"); } catch { }
+            const string ramdiskLogDir = @"X:\temp\ZView";
+            try
+            {
+                if (Directory.Exists(@"X:\"))
+                {
+                    Directory.CreateDirectory(ramdiskLogDir);
+                    string candidate = Path.Combine(ramdiskLogDir, "session.log");
+                    File.WriteAllText(candidate, string.Empty); // 実際に書き込めるかをここで確認する
+                    return candidate;
+                }
+            }
+            catch
+            {
+                // X:ドライブが存在しない/読み取り専用/権限不足等は、プログラムルートへフォールバックする
+            }
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "session.log");
         }
 
-        private readonly object _logLock = new();
+        private void InitLog()
+        {
+            try
+            {
+                _logWriter = new StreamWriter(_logPath, append: false, System.Text.Encoding.UTF8) { AutoFlush = false };
+                _logWriter.WriteLine($"=== Session Started at {DateTime.Now} === (log path: {_logPath})");
+                _logWriter.Flush();
+            }
+            catch { _logWriter = null; }
+
+            // バックグラウンドの専用タスクが1本のStreamWriterを使い回して書き続ける。
+            // ファイルの開閉は起動時と終了時の1回ずつだけで、呼び出し側は完全にノンブロッキング。
+            _logWriterTask = Task.Run(async () =>
+            {
+                try
+                {
+                    await foreach (var line in _logChannel.Reader.ReadAllAsync())
+                    {
+                        try
+                        {
+                            _logWriter?.WriteLine(line);
+                            _logWriter?.Flush();
+                        }
+                        catch { /* 個々の書き込み失敗でログ基盤全体を止めない */ }
+                    }
+                }
+                catch { /* チャンネル異常終了時も無視（アプリ終了時など） */ }
+            });
+        }
+
         private void WriteLog(string message)
         {
-            lock (_logLock)
-            {
-                try { File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] {message}\n"); } catch { }
-            }
+            // ファイルI/Oは一切ここで行わない。キューへ積むだけなのでAI推論スレッドを塞がない。
+            _logChannel.Writer.TryWrite($"[{DateTime.Now:HH:mm:ss}] {message}");
         }
 
         private void LoadConfig()
@@ -164,6 +223,11 @@ namespace ZiView
                 }
             }
             catch { }
+
+            // ログキューを締め切り、バックグラウンドタスクが残りを書き切るのを少し待ってから閉じる
+            _logChannel.Writer.TryComplete();
+            try { _logWriterTask?.Wait(500); } catch { }
+            try { _logWriter?.Flush(); _logWriter?.Dispose(); } catch { }
         }
 
         private void ApplyConfigToUi()
