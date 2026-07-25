@@ -1,38 +1,47 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
-    <ApplicationIcon>ZiView.ico</ApplicationIcon>
-  </PropertyGroup>
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net9.0-windows</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UseWPF>true</UseWPF>
+		<ApplicationIcon>ZiView.ico</ApplicationIcon>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <None Remove="LensCorrectionEffect.hlsl" />
-    <None Remove="LensCorrectionEffect.ps" />
-  </ItemGroup>
+	<ItemGroup>
+		<None Remove="LensCorrectionEffect.hlsl" />
+		<None Remove="LensCorrectionEffect.ps" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <Content Include="ZiView.ico" />
-  </ItemGroup>
+	<ItemGroup>
+		<Content Include="ZiView.ico" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.15.0" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.26.0" />
-    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260602" />
-    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260602" />
-    <PackageReference Include="OpenCvSharp4.WpfExtensions" Version="4.13.0.20260602" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.15.0" />
+		<PackageReference Include="OpenCvSharp4" Version="4.13.0.20260602" />
+		<PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260602" />
+		<PackageReference Include="OpenCvSharp4.WpfExtensions" Version="4.13.0.20260602" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <Resource Include="LensCorrectionEffect.hlsl">
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-    </Resource>
-    <Resource Include="LensCorrectionEffect.ps">
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-    </Resource>
-  </ItemGroup>
+	<!-- NVIDIA環境用 (Debug / Release などの標準ビルド時) -->
+	<ItemGroup Condition="'$(Configuration)' != 'Intel_Rel'">
+		<PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.26.0" />
+	</ItemGroup>
+
+	<!-- Intel環境用 (Intel_Release ビルド時) -->
+	<ItemGroup Condition="'$(Configuration)' == 'Intel_Rel'">
+		<PackageReference Include="Intel.ML.OnnxRuntime.OpenVino" Version="1.24.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Resource Include="LensCorrectionEffect.hlsl">
+			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="LensCorrectionEffect.ps">
+			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		</Resource>
+	</ItemGroup>
 
 </Project>

@@ -242,8 +242,9 @@
                     <Border Style="{StaticResource CardPanel}" Margin="0">
                         <StackPanel>
                             <TextBlock Text="推論エンジン" Style="{StaticResource SectionLabel}"/>
-                            <RadioButton x:Name="RadioTensorRt" GroupName="Engine" Content="TensorRT優先（TensorRT → CUDA → CPU）"/>
-                            <RadioButton x:Name="RadioCuda" GroupName="Engine" Content="CUDA優先（CUDA → CPUのみ）"/>
+                            <RadioButton x:Name="RadioTensorRt" GroupName="Engine" Content="TensorRT優先（TensorRT → CUDA → OpenVINO → CPU）"/>
+                            <RadioButton x:Name="RadioCuda" GroupName="Engine" Content="CUDA優先（CUDA → OpenVINO → CPU）"/>
+                            <RadioButton x:Name="RadioOpenVino" GroupName="Engine" Content="OpenVINO優先（OpenVINO → CPUのみ、Intel CPU向け）"/>
 
                             <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
 

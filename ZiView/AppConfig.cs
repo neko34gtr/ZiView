@@ -43,7 +43,10 @@ namespace ZiView
         // AI進捗OSDの表示位置: TopCenter / TopLeft / TopRight / BottomCenter
         public string AiOsdPosition { get; set; } = "TopCenter";
 
-        // 推論エンジンの優先モード: "TensorRT"(TensorRT→CUDA→CPU) / "CUDA"(CUDA→CPUのみ)
+        // 推論エンジンの優先モード:
+        //   "TensorRT" : TensorRT → CUDA → OpenVINO → CPU
+        //   "CUDA"     : CUDA → OpenVINO → CPU
+        //   "OpenVINO" : OpenVINO → CPU（Intel CPU向け）
         public string EnginePreference { get; set; } = "TensorRT";
 
         // AIモデル(*.onnx)を探すフォルダ。空文字はプログラムルート（従来互換）。

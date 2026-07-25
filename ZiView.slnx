@@ -1,3 +1,10 @@
 <Solution>
-  <Project Path="ZiView/ZiView.csproj" />
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Intel_R" />
+    <BuildType Name="Release" />
+  </Configurations>
+  <Project Path="ZiView/ZiView.csproj">
+    <BuildType Solution="Intel_R|*" Project="Release" />
+  </Project>
 </Solution>

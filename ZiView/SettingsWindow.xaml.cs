@@ -67,8 +67,9 @@ namespace ZiView
             _config = config;
             _selectedModelFolder = _config.ModelFolder;
 
-            RadioTensorRt.IsChecked = _config.EnginePreference != "CUDA";
+            RadioTensorRt.IsChecked = _config.EnginePreference != "CUDA" && _config.EnginePreference != "OpenVINO";
             RadioCuda.IsChecked = _config.EnginePreference == "CUDA";
+            RadioOpenVino.IsChecked = _config.EnginePreference == "OpenVINO";
             TrtCacheCheckBox.IsChecked = _config.TensorRtEngineCacheEnabled;
             UpdateTrtCacheSizeText();
 
@@ -216,7 +217,9 @@ namespace ZiView
             }
 
             _config.ExcludedModels = _entries.Where(x => !x.IsEnabled).Select(x => x.FileName).ToList();
-            _config.EnginePreference = (RadioCuda.IsChecked == true) ? "CUDA" : "TensorRT";
+            _config.EnginePreference = (RadioCuda.IsChecked == true) ? "CUDA"
+                : (RadioOpenVino.IsChecked == true) ? "OpenVINO"
+                : "TensorRT";
             _config.TensorRtEngineCacheEnabled = TrtCacheCheckBox.IsChecked ?? true;
             _config.ModelFolder = _selectedModelFolder;
 

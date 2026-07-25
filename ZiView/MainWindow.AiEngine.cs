@@ -45,63 +45,42 @@ namespace ZiView
                 var available = OrtEnv.Instance().GetAvailableProviders();
                 WriteLog($"Available Providers: {string.Join(", ", available)}. Preference: {_config.EnginePreference}");
 
-                if (_config.EnginePreference == "CUDA")
+                // 優先モードごとのフォールバック順序:
+                //   TensorRT優先: TensorRT → CUDA → OpenVINO → CPU
+                //   CUDA優先    : CUDA → OpenVINO → CPU
+                //   OpenVINO優先: OpenVINO → CPU
+                List<(string Name, string DisplayMode, Action Append)> chain = _config.EnginePreference switch
                 {
-                    // CUDA優先モード: TensorRTは試さず、CUDA→CPUのみで軽快に確定させる
-                    try
+                    "CUDA" => new()
                     {
-                        WriteLog("Attempting CUDA...");
-                        options.AppendExecutionProvider_CUDA(0);
-                        _activeEngineMode = "RTX (CUDA)";
-                    }
-                    catch (Exception exCuda)
+                        ("CUDA", "RTX (CUDA)", () => AppendCuda(options)),
+                        ("OpenVINO", "Intel (OpenVINO)", () => AppendOpenVino(options)),
+                    },
+                    "OpenVINO" => new()
                     {
-                        WriteLog($"CUDA down: {exCuda.Message}");
-                        _activeEngineMode = "CPU Mode";
-                    }
-                }
-                else
-                {
-                    // TensorRT優先モード: TensorRT→CUDA→CPU の順にフォールバック
-                    try
+                        ("OpenVINO", "Intel (OpenVINO)", () => AppendOpenVino(options)),
+                    },
+                    _ => new() // "TensorRT"（既定）
                     {
-                        WriteLog("Attempting TensorRT...");
-                        if (_config.TensorRtEngineCacheEnabled)
-                        {
-                            string cacheDir = GetTensorRtCacheDirectory();
-                            Directory.CreateDirectory(cacheDir);
+                        ("TensorRT", "RTX (TensorRT)", () => AppendTensorRt(options)),
+                        ("CUDA", "RTX (CUDA)", () => AppendCuda(options)),
+                        ("OpenVINO", "Intel (OpenVINO)", () => AppendOpenVino(options)),
+                    },
+                };
 
-                            var trtOptions = new OrtTensorRTProviderOptions();
-                            trtOptions.UpdateOptions(new Dictionary<string, string>
-                            {
-                                ["device_id"] = "0",
-                                ["trt_engine_cache_enable"] = "1",
-                                ["trt_engine_cache_path"] = cacheDir,
-                                ["trt_timing_cache_enable"] = "1",
-                            });
-                            options.AppendExecutionProvider_Tensorrt(trtOptions);
-                            WriteLog($"TensorRT engine cache enabled: {cacheDir}");
-                        }
-                        else
-                        {
-                            options.AppendExecutionProvider_Tensorrt(0);
-                        }
-                        _activeEngineMode = "RTX (TensorRT)";
-                    }
-                    catch (Exception exTrt)
+                _activeEngineMode = "CPU Mode";
+                foreach (var (name, displayMode, append) in chain)
+                {
+                    try
                     {
-                        WriteLog($"TensorRT down: {exTrt.Message}");
-                        try
-                        {
-                            WriteLog("Attempting CUDA...");
-                            options.AppendExecutionProvider_CUDA(0);
-                            _activeEngineMode = "RTX (CUDA)";
-                        }
-                        catch (Exception exCuda)
-                        {
-                            WriteLog($"CUDA down: {exCuda.Message}");
-                            _activeEngineMode = "CPU Mode";
-                        }
+                        WriteLog($"Attempting {name}...");
+                        append();
+                        _activeEngineMode = displayMode;
+                        break;
+                    }
+                    catch (Exception exProvider)
+                    {
+                        WriteLog($"{name} down: {exProvider.Message}");
                     }
                 }
 
@@ -174,6 +153,48 @@ namespace ZiView
             {
                 WriteLog($"[AI] Engine warmup skipped/failed: {ex.Message}");
             }
+        }
+
+        private void AppendTensorRt(SessionOptions options)
+        {
+            if (_config.TensorRtEngineCacheEnabled)
+            {
+                string cacheDir = GetTensorRtCacheDirectory();
+                Directory.CreateDirectory(cacheDir);
+
+                var trtOptions = new OrtTensorRTProviderOptions();
+                trtOptions.UpdateOptions(new Dictionary<string, string>
+                {
+                    ["device_id"] = "0",
+                    ["trt_engine_cache_enable"] = "1",
+                    ["trt_engine_cache_path"] = cacheDir,
+                    ["trt_timing_cache_enable"] = "1",
+                });
+                options.AppendExecutionProvider_Tensorrt(trtOptions);
+                WriteLog($"TensorRT engine cache enabled: {cacheDir}");
+            }
+            else
+            {
+                options.AppendExecutionProvider_Tensorrt(0);
+            }
+        }
+
+        private void AppendCuda(SessionOptions options)
+        {
+            options.AppendExecutionProvider_CUDA(0);
+        }
+
+        /// <summary>
+        /// Intel CPU（および対応環境ではiGPU/NPU）向けのOpenVINO実行プロバイダーを追加する。
+        /// 注意: 現行の Microsoft.ML.OnnxRuntime.Gpu パッケージにはOpenVINO用のネイティブライブラリは
+        /// 含まれていない。Intel配布のOpenVINO対応ONNX Runtimeパッケージ（またはOpenVINO Runtime本体の
+        /// 該当DLL）を別途用意しない環境では、ここで例外となり自動的にCPUへフォールバックする
+        /// （TensorRT/CUDAが未導入環境で自動的にフォールバックするのと同じ挙動）。
+        /// AppendExecutionProvider_OpenVINOはDictionaryではなくstring（デバイス指定）を取る点に注意。
+        /// </summary>
+        private void AppendOpenVino(SessionOptions options)
+        {
+            options.AppendExecutionProvider_OpenVINO("CPU");
         }
 
         // 既知モデルのファイル名 → 特性・用途カテゴリの対応表。
