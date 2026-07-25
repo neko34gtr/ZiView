@@ -30,6 +30,8 @@ namespace ZiView
         private readonly ObservableCollection<ModelEntry> _entries = new();
         private readonly ObservableCollection<string> _categories = new();
         private string _selectedModelFolder;
+        private string _selectedLogDirectory;
+        private string _selectedTrtCacheDirectory;
 
         // モデル単位の行データ。カテゴリはComboBoxからのTwoWayバインド対象のため変更通知が必要。
         private class ModelEntry : INotifyPropertyChanged
@@ -66,11 +68,15 @@ namespace ZiView
 
             _config = config;
             _selectedModelFolder = _config.ModelFolder;
+            _selectedLogDirectory = _config.LogDirectory;
+            _selectedTrtCacheDirectory = _config.TensorRtCacheDirectory;
 
             RadioTensorRt.IsChecked = _config.EnginePreference != "CUDA" && _config.EnginePreference != "OpenVINO";
             RadioCuda.IsChecked = _config.EnginePreference == "CUDA";
             RadioOpenVino.IsChecked = _config.EnginePreference == "OpenVINO";
             TrtCacheCheckBox.IsChecked = _config.TensorRtEngineCacheEnabled;
+            UpdateLogDirectoryText();
+            UpdateTrtCacheDirectoryText();
             UpdateTrtCacheSizeText();
 
             ModelFolderTextBox.Text = MainWindow.GetModelDirectory(_selectedModelFolder);
@@ -81,11 +87,59 @@ namespace ZiView
             LoadModelList();
         }
 
+        private void UpdateLogDirectoryText()
+        {
+            LogDirectoryTextBox.Text = string.IsNullOrWhiteSpace(_selectedLogDirectory)
+                ? "（未指定：自動判定 — X:\\temp\\ZView を優先）"
+                : _selectedLogDirectory;
+        }
+
+        private void UpdateTrtCacheDirectoryText()
+        {
+            TrtCacheDirectoryTextBox.Text = string.IsNullOrWhiteSpace(_selectedTrtCacheDirectory)
+                ? "（未指定：自動判定 — X:\\temp\\ZView\\trt_cache を優先）"
+                : _selectedTrtCacheDirectory;
+        }
+
+        private void BrowseLogDirectory_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "ログ出力先フォルダを選択" };
+            if (dialog.ShowDialog(this) == true)
+            {
+                _selectedLogDirectory = dialog.FolderName;
+                UpdateLogDirectoryText();
+            }
+        }
+
+        private void ResetLogDirectory_Click(object sender, RoutedEventArgs e)
+        {
+            _selectedLogDirectory = "";
+            UpdateLogDirectoryText();
+        }
+
+        private void BrowseTrtCacheDirectory_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "TensorRTキャッシュ出力先フォルダを選択" };
+            if (dialog.ShowDialog(this) == true)
+            {
+                _selectedTrtCacheDirectory = dialog.FolderName;
+                UpdateTrtCacheDirectoryText();
+                UpdateTrtCacheSizeText();
+            }
+        }
+
+        private void ResetTrtCacheDirectory_Click(object sender, RoutedEventArgs e)
+        {
+            _selectedTrtCacheDirectory = "";
+            UpdateTrtCacheDirectoryText();
+            UpdateTrtCacheSizeText();
+        }
+
         private void UpdateTrtCacheSizeText()
         {
             try
             {
-                string cacheDir = MainWindow.GetTensorRtCacheDirectory();
+                string cacheDir = MainWindow.GetTensorRtCacheDirectory(_selectedTrtCacheDirectory);
                 if (!Directory.Exists(cacheDir))
                 {
                     TrtCacheSizeText.Text = "キャッシュサイズ: 0 MB（未生成）";
@@ -104,7 +158,7 @@ namespace ZiView
         {
             try
             {
-                string cacheDir = MainWindow.GetTensorRtCacheDirectory();
+                string cacheDir = MainWindow.GetTensorRtCacheDirectory(_selectedTrtCacheDirectory);
                 if (Directory.Exists(cacheDir))
                 {
                     var result = MessageBox.Show(
@@ -222,6 +276,8 @@ namespace ZiView
                 : "TensorRT";
             _config.TensorRtEngineCacheEnabled = TrtCacheCheckBox.IsChecked ?? true;
             _config.ModelFolder = _selectedModelFolder;
+            _config.LogDirectory = _selectedLogDirectory;
+            _config.TensorRtCacheDirectory = _selectedTrtCacheDirectory;
 
             // 既定の自動分類と異なるものだけを差分として保存する
             _config.ModelCategoryOverrides = _entries

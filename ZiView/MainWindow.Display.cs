@@ -192,6 +192,11 @@ namespace ZiView
             {
                 bool isSpread;
 
+                // 下部ページスライダーの操作中（ホバー/ドラッグ中）は、すっ飛ばし移動が前提のため
+                // AI推論そのものを起こさない。無駄な推論の連鎖キャンセル・キュー暴走を防ぐのが目的で、
+                // 操作をやめた瞬間（ホバー解除かつドラッグ解放）に改めてAI推論付きで再表示する
+                bool sliderBusy = PageSlider.IsMouseOver || PageSlider.IsMouseCaptureWithin;
+
                 if (_pageCache.TryGetValue(index, out var cached))
                 {
                     // 先読み済みのページはデコード・AI推論を一切行わず即座に反映する
@@ -240,7 +245,11 @@ namespace ZiView
 
                     UpdateImageDisplay();
 
-                    if (!_config.EnableAiInference)
+                    if (sliderBusy)
+                    {
+                        StatusText.Text = "Mode: Skipped (ページ送り中)";
+                    }
+                    else if (!_config.EnableAiInference)
                     {
                         StatusText.Text = "Mode: AI Disabled";
                     }
@@ -311,7 +320,8 @@ namespace ZiView
                 }
 
                 // 現在ページの表示が完了した直後、AI先読みが有効な場合のみ次ページ以降を裏で準備しておく
-                if (CheckPrefetch.IsChecked == true && !token.IsCancellationRequested)
+                // （スライダー操作中はどうせ通り過ぎるだけなので先読み自体も無駄になるため起こさない）
+                if (!sliderBusy && CheckPrefetch.IsChecked == true && !token.IsCancellationRequested)
                 {
                     int step = (CheckSpread.IsChecked == true) ? 2 : 1;
                     int count = Math.Clamp(_config.PrefetchPageCount, 1, 5);

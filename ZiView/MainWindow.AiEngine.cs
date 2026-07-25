@@ -159,7 +159,7 @@ namespace ZiView
         {
             if (_config.TensorRtEngineCacheEnabled)
             {
-                string cacheDir = GetTensorRtCacheDirectory();
+                string cacheDir = GetTensorRtCacheDirectory(_config.TensorRtCacheDirectory);
                 Directory.CreateDirectory(cacheDir);
 
                 var trtOptions = new OrtTensorRTProviderOptions();
@@ -232,35 +232,42 @@ namespace ZiView
         }
 
         /// <summary>
-        /// TensorRTエンジンキャッシュの保存先。
-        /// RAMディスクが存在する場合は優先して使用し、存在しない場合はプログラムルート直下を使用する。
+        /// TensorRTエンジンキャッシュの保存先。プログラムルート直下の固定フォルダとし、
+        /// ModelFolderの変更に影響されないようにする。
         /// </summary>
-        internal static string GetTensorRtCacheDirectory()
+        /// <summary>
+        /// TensorRTエンジンキャッシュの出力先を決定する。
+        /// customDirが指定されていればそれを最優先（書き込み確認込み）。
+        /// 未指定時はX:\temp\ZView\trt_cache（RAMDISK運用想定）が使えればそちらへ、
+        /// 使えなければプログラムルート直下\trt_cache へフォールバックする。
+        /// </summary>
+        internal static string GetTensorRtCacheDirectory(string? customDir)
         {
-            // RAMディスク上の出力先（環境に合わせてドライブ文字を変更）
-            string ramdiskDir = @"X:\temp\ZView\trt_cache";
-
-            string targetDir;
-
-            // RAMディスク（ドライブ）が存在するかチェック
-            string? root = Path.GetPathRoot(ramdiskDir);
-            if (!string.IsNullOrEmpty(root) && Directory.Exists(root))
+            if (!string.IsNullOrWhiteSpace(customDir))
             {
-                targetDir = ramdiskDir;
-            }
-            else
-            {
-                // ドライブがない場合のフォールバック（プログラムルート直下）
-                targetDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trt_cache");
+                try
+                {
+                    Directory.CreateDirectory(customDir);
+                    return customDir;
+                }
+                catch
+                {
+                    // 指定フォルダに書き込めない場合は自動判定へフォールバックする
+                }
             }
 
-            // ディレクトリが存在しなければ作成しておく
-            if (!Directory.Exists(targetDir))
+            try
             {
-                Directory.CreateDirectory(targetDir);
+                if (Directory.Exists(@"X:\"))
+                {
+                    const string ramdiskCacheDir = @"X:\temp\ZView\trt_cache";
+                    Directory.CreateDirectory(ramdiskCacheDir);
+                    return ramdiskCacheDir;
+                }
             }
+            catch { }
 
-            return targetDir;
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trt_cache");
         }
 
         internal static string GetModelCategory(string fileName)

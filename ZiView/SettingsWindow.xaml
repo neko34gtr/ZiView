@@ -1,7 +1,7 @@
 ﻿<Window x:Class="ZiView.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="ZiView 設定" Height="740" Width="680"
+        Title="ZiView 設定" Height="720" Width="680"
         Background="#0A0A0C" Foreground="White"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip">
@@ -216,58 +216,85 @@
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="設定" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,16"/>
+        <TabControl Grid.Row="0">
 
-        <TabControl Grid.Row="1">
-
-            <!-- ===== システム設定タブ：モデルパス・推論エンジン（スクロール無し） ===== -->
+            <!-- ===== システム設定タブ：モデルパス・推論エンジン ===== -->
             <TabItem Header="システム設定">
-                <StackPanel>
-                    <Border Style="{StaticResource CardPanel}">
-                        <StackPanel>
-                            <TextBlock Text="モデルフォルダ" Style="{StaticResource SectionLabel}"/>
-                            <TextBox x:Name="ModelFolderTextBox" IsReadOnly="True" TextWrapping="Wrap"
-                                     Background="#101014" Foreground="{StaticResource TextPrimaryBrush}"
-                                     BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
-                                     Padding="8" Margin="0,0,0,10"/>
-                            <Button Content="フォルダを選択..." HorizontalAlignment="Left" Click="BrowseModelFolder_Click"/>
-                        </StackPanel>
-                    </Border>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Border Style="{StaticResource CardPanel}">
+                            <StackPanel>
+                                <TextBlock Text="モデルフォルダ" Style="{StaticResource SectionLabel}"/>
+                                <TextBox x:Name="ModelFolderTextBox" IsReadOnly="True" TextWrapping="Wrap"
+                                         Background="#101014" Foreground="{StaticResource TextPrimaryBrush}"
+                                         BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                                         Padding="8" Margin="0,0,0,10"/>
+                                <Button Content="フォルダを選択..." HorizontalAlignment="Left" Click="BrowseModelFolder_Click"/>
+                            </StackPanel>
+                        </Border>
 
-                    <Border Style="{StaticResource CardPanel}" Margin="0">
-                        <StackPanel>
-                            <TextBlock Text="推論エンジン" Style="{StaticResource SectionLabel}"/>
-                            <RadioButton x:Name="RadioTensorRt" GroupName="Engine" Content="TensorRT優先（TensorRT → CUDA → OpenVINO → CPU）"/>
-                            <RadioButton x:Name="RadioCuda" GroupName="Engine" Content="CUDA優先（CUDA → OpenVINO → CPU）"/>
-                            <RadioButton x:Name="RadioOpenVino" GroupName="Engine" Content="OpenVINO優先（OpenVINO → CPUのみ、Intel CPU向け）"/>
+                        <Border Style="{StaticResource CardPanel}">
+                            <StackPanel>
+                                <TextBlock Text="ログ出力先フォルダ" Style="{StaticResource SectionLabel}"/>
+                                <TextBox x:Name="LogDirectoryTextBox" IsReadOnly="True" TextWrapping="Wrap"
+                                         Background="#101014" Foreground="{StaticResource TextPrimaryBrush}"
+                                         BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                                         Padding="8" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="フォルダを選択..." Click="BrowseLogDirectory_Click" Margin="0,0,10,0"/>
+                                    <Button Content="自動判定に戻す" Click="ResetLogDirectory_Click"/>
+                                </StackPanel>
+                                <TextBlock Text="未指定（自動）の場合、X:\temp\ZView が使えればそちらへ、使えなければプログラムルート直下へ出力します。変更は次回起動時から反映されます。"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                            </StackPanel>
+                        </Border>
 
-                            <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
+                        <Border Style="{StaticResource CardPanel}" Margin="0">
+                            <StackPanel>
+                                <TextBlock Text="推論エンジン" Style="{StaticResource SectionLabel}"/>
+                                <RadioButton x:Name="RadioTensorRt" GroupName="Engine" Content="TensorRT優先（TensorRT → CUDA → OpenVINO → CPU）"/>
+                                <RadioButton x:Name="RadioCuda" GroupName="Engine" Content="CUDA優先（CUDA → OpenVINO → CPU）"/>
+                                <RadioButton x:Name="RadioOpenVino" GroupName="Engine" Content="OpenVINO優先（OpenVINO → CPUのみ、Intel CPU向け）"/>
 
-                            <CheckBox x:Name="TrtCacheCheckBox" Content="TensorRTエンジンキャッシュを永続化する" Margin="0,0,0,4"/>
-                            <TextBlock Text="初回のみビルドで低速、2回目以降は同一モデル・同一環境なら高速起動になります。"
-                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
 
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock x:Name="TrtCacheSizeText" Grid.Column="0" Text="キャッシュサイズ: 計算中..."
-                                           Foreground="{StaticResource TextCaptionBrush}" FontSize="11" VerticalAlignment="Center"/>
-                                <Button x:Name="ClearTrtCacheButton" Grid.Column="1" Content="キャッシュを削除" FontSize="11" Padding="10,5"
-                                        Click="ClearTrtCacheButton_Click"/>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
+                                <TextBlock Text="TensorRTキャッシュ出力先フォルダ" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
+                                <TextBox x:Name="TrtCacheDirectoryTextBox" IsReadOnly="True" TextWrapping="Wrap"
+                                         Background="#101014" Foreground="{StaticResource TextPrimaryBrush}"
+                                         BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                                         Padding="8" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                    <Button Content="フォルダを選択..." Click="BrowseTrtCacheDirectory_Click" Margin="0,0,10,0"/>
+                                    <Button Content="自動判定に戻す" Click="ResetTrtCacheDirectory_Click"/>
+                                </StackPanel>
+                                <TextBlock Text="未指定（自動）の場合、X:\temp\ZView\trt_cache が使えればそちらへ、使えなければプログラムルート直下\trt_cache へ出力します。変更は次回のAIエンジン初期化時（起動・モデル切替等）から反映されます。"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                                <CheckBox x:Name="TrtCacheCheckBox" Content="TensorRTエンジンキャッシュを永続化する" Margin="0,0,0,4"/>
+                                <TextBlock Text="初回のみビルドで低速、2回目以降は同一モデル・同一環境なら高速起動になります。"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="TrtCacheSizeText" Grid.Column="0" Text="キャッシュサイズ: 計算中..."
+                                               Foreground="{StaticResource TextCaptionBrush}" FontSize="11" VerticalAlignment="Center"/>
+                                    <Button x:Name="ClearTrtCacheButton" Grid.Column="1" Content="キャッシュを削除" FontSize="11" Padding="10,5"
+                                            Click="ClearTrtCacheButton_Click"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
 
-            <!-- ===== AIモデル管理タブ：カテゴリ編集＋モデル割当（こちら側のみスクロール） ===== -->
+            <!-- ===== AIモデル管理タブ：カテゴリ編集＋モデル割当 ===== -->
             <TabItem Header="AIモデル管理">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
@@ -356,7 +383,7 @@
 
         </TabControl>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button Content="キャンセル" Click="CancelButton_Click" Margin="0,0,10,0"/>
             <Button Content="保存して閉じる" Click="SaveButton_Click"/>
         </StackPanel>

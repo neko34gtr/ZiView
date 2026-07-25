@@ -61,6 +61,13 @@ namespace ZiView
         // ユーザーが作成したカスタムカテゴリ名（現在モデルが1つも割り当てられていないものも保持するため）。
         public List<string> CustomCategories { get; set; } = new();
 
+        // ログ出力先フォルダ（空文字なら自動判定：X:\temp\ZView が使えれば優先、無ければプログラムルート直下）
+        public string LogDirectory { get; set; } = "";
+
+        // TensorRTエンジンキャッシュの出力先フォルダ（空文字なら自動判定：
+        // X:\temp\ZView\trt_cache が使えれば優先、無ければプログラムルート直下\trt_cache）
+        public string TensorRtCacheDirectory { get; set; } = "";
+
         // TensorRTのエンジンキャッシュ(ビルド済み最適化エンジン)をディスクへ永続化するか。
         // ONにすると初回のみ低速（エンジンビルド）、2回目以降は大幅に高速化される。
         // ディスク容量が気になる場合はOFFにするか、SettingsWindowからキャッシュを削除できる。

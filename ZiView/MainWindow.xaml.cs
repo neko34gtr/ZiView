@@ -31,9 +31,9 @@ namespace ZiView
         // パス定義
         private readonly string _configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "zi_view_config.json");
 
-        // ログ出力先: RAMDISK（X:\temp\ZView）が使えればそちらへ書き込みSSDへの書き込みを避ける。
-        // 使えない場合（ドライブ非存在・書き込み不可等）は従来通りプログラムルート直下へフォールバックする。
-        private readonly string _logPath = ResolveLogPath();
+        // ログ出力先: LoadConfig()完了後、コンストラクタ内でResolveLogPath()により確定する
+        // （設定ウィンドウでのカスタムパス指定を反映するため、フィールド初期化子ではなく明示的に遅延させる）。
+        private string _logPath = string.Empty;
 
         // ログ書き込みを非同期化するための一本化されたチャンネル。
         // 呼び出し側（AI推論スレッド含む）はキューへ積むだけで即座に戻り、
@@ -50,10 +50,12 @@ namespace ZiView
         public MainWindow(string[]? args = null)
         {
             InitializeComponent();
+
+            // ログ出力先（カスタム指定）を反映できるよう、先に設定を読み込んでからログ基盤を初期化する
+            LoadConfig();
+            _logPath = ResolveLogPath(_config.LogDirectory);
             InitLog();
             WriteLog("ZiView Engine Starting (Native Core Standard)...");
-
-            LoadConfig();
 
             if (args != null && args.Length > 0)
             {
@@ -97,12 +99,28 @@ namespace ZiView
         }
 
         /// <summary>
-        /// ログ出力先を決定する。X:ドライブ（RAMDISK運用を想定）が存在し実際に書き込める場合は
+        /// ログ出力先を決定する。customDir（設定ウィンドウでの指定）があれば最優先（書き込み確認込み）。
+        /// 未指定時はX:ドライブ（RAMDISK運用を想定）が存在し実際に書き込める場合は
         /// X:\temp\ZView\session.log を使い、SSDへの書き込みを避ける。それ以外は従来通り
         /// プログラムルート直下へフォールバックする。
         /// </summary>
-        private static string ResolveLogPath()
+        private static string ResolveLogPath(string? customDir)
         {
+            if (!string.IsNullOrWhiteSpace(customDir))
+            {
+                try
+                {
+                    Directory.CreateDirectory(customDir);
+                    string candidate = Path.Combine(customDir, "session.log");
+                    File.WriteAllText(candidate, string.Empty); // 実際に書き込めるかをここで確認する
+                    return candidate;
+                }
+                catch
+                {
+                    // 指定フォルダに書き込めない場合は自動判定へフォールバックする
+                }
+            }
+
             const string ramdiskLogDir = @"X:\temp\ZView";
             try
             {
@@ -284,6 +302,17 @@ namespace ZiView
             {
                 if (_isUpdatingPageSliderInternal) return;
                 RefreshDisplay();
+            };
+
+            // ホバー解除・ドラッグ解放の両方が揃った時点（＝完全に操作が終わった時点）で
+            // 現在ページをAI推論付きで改めて表示し直す。操作中に抑止していた分を1回だけ回収する形。
+            PageSlider.MouseLeave += (s, e) =>
+            {
+                if (!PageSlider.IsMouseCaptureWithin) RefreshDisplay();
+            };
+            PageSlider.LostMouseCapture += (s, e) =>
+            {
+                if (!PageSlider.IsMouseOver) RefreshDisplay();
             };
 
             SplitSlider.ValueChanged += (s, e) => UpdateImageDisplay();
