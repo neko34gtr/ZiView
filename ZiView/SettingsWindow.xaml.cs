@@ -161,9 +161,9 @@ namespace ZiView
                 string cacheDir = MainWindow.GetTensorRtCacheDirectory(_selectedTrtCacheDirectory);
                 if (Directory.Exists(cacheDir))
                 {
-                    var result = MessageBox.Show(
+                    var result = AppMessageBox.Show(this,
                         "TensorRTエンジンキャッシュを削除します。\n次回TensorRT利用時、初回相当のビルド時間がかかり直します。\n\nよろしいですか？",
-                        "キャッシュの削除", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        "キャッシュの削除", MessageBoxButton.YesNo, MessageBoxImage.Question, isDarkMode: true);
                     if (result != MessageBoxResult.Yes) return;
 
                     Directory.Delete(cacheDir, true);
@@ -172,7 +172,7 @@ namespace ZiView
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"キャッシュの削除に失敗しました: {ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show(this, $"キャッシュの削除に失敗しました: {ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error, isDarkMode: true);
             }
         }
 
@@ -265,8 +265,8 @@ namespace ZiView
             // 少なくとも1つは有効なモデルを残す（全除外での起動不能を防ぐ）
             if (_entries.Count > 0 && _entries.All(x => !x.IsEnabled))
             {
-                MessageBox.Show("すべてのモデルを無効にすることはできません。少なくとも1つは有効にしてください。",
-                    "設定", MessageBoxButton.OK, MessageBoxImage.Warning);
+                AppMessageBox.Show(this, "すべてのモデルを無効にすることはできません。少なくとも1つは有効にしてください。",
+                    "設定", MessageBoxButton.OK, MessageBoxImage.Warning, isDarkMode: true);
                 return;
             }
 
