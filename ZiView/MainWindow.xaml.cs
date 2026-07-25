@@ -73,10 +73,12 @@ namespace ZiView
             _monitorTimer.Tick += (s, e) => UpdateMemoryUsage();
             _monitorTimer.Start();
 
-            this.Loaded += (s, e) =>
+            this.Loaded += async (s, e) =>
             {
                 ScanOnnxModels();
-                InitializeAi();
+                // TensorRT構築・ウォームアップは重いため、オーバーレイ表示＋バックグラウンド実行にして
+                // UIスレッドの応答なし（白画面）状態を回避する
+                await InitializeAiWithOverlayAsync(_config.SelectedModel);
                 ApplyConfigToUi();
                 if (!string.IsNullOrEmpty(_currentSourcePath))
                 {

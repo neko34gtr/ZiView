@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -25,9 +26,49 @@ namespace ZiView
         private bool _isUpdatingModelComboInternal = false;
         private string _activeEngineMode = "Unknown";
 
+        // 全画面一括推論の適用条件（4K以下・空きVRAM6GB以上ならタイル分割を回避）
+        private const int FullFrameMaxLongSidePx = 3840;
+        private const long FullFrameMinFreeVramMB = 6000;
+        // タイルバッチ推論の1回あたり最大タイル数（TensorRT Dynamic Batch Opt=35を想定）
+        private const int TileBatchSize = 35;
+
+        // バッチ推論がモデル/エンジン側で拒否された場合（固定バッチ=1のTensorRTエンジン等）、
+        // そのセッション中は繰り返し失敗させず1タイルずつの処理へ切り替える
+        private bool _batchInferenceSupported = true;
+
+        // nvidia-smi呼び出しは数十msかかるため、直近の空きVRAM値を一定時間キャッシュして使い回す
+        private long _lastFreeVramMB = -1;
+        private readonly System.Diagnostics.Stopwatch _vramCheckStopwatch = System.Diagnostics.Stopwatch.StartNew();
+
         [ThreadStatic] private static float[]? _tileInputBuffer;
 
         private void InitializeAi() => InitializeAi(_config.SelectedModel);
+
+        /// <summary>
+        /// InitializeAi(同期・重い処理)をバックグラウンドスレッドで実行しつつ、
+        /// その間は非モーダルのオーバーレイでユーザーに「処理中」であることを示す。
+        /// TensorRTエンジン構築・ウォームアップ（初回数十秒かかりうる）でUIが白画面のまま
+        /// 応答なしに見える問題への対処。呼び出し中はメインウィンドウの操作を無効化する。
+        /// </summary>
+        private async Task InitializeAiWithOverlayAsync(string modelFileName)
+        {
+            var overlay = new EngineStatusOverlay(
+                "AIエンジンを構築中です…\n初回はモデル/GPUの組み合わせごとに数十秒かかることがあります。そのままお待ちください。")
+            {
+                Owner = this
+            };
+            overlay.Show();
+            this.IsEnabled = false;
+            try
+            {
+                await Task.Run(() => InitializeAi(modelFileName));
+            }
+            finally
+            {
+                this.IsEnabled = true;
+                overlay.Close();
+            }
+        }
 
         private void InitializeAi(string modelFileName)
         {
@@ -37,7 +78,7 @@ namespace ZiView
                 if (!File.Exists(modelPath))
                 {
                     WriteLog("ERROR: Model file not found at " + modelPath);
-                    StatusText.Text = "Mode: Model Missing";
+                    Dispatcher.Invoke(() => StatusText.Text = "Mode: Model Missing");
                     return;
                 }
 
@@ -69,6 +110,7 @@ namespace ZiView
                 };
 
                 _activeEngineMode = "CPU Mode";
+                _batchInferenceSupported = true; // モデル/エンジンを切り替えたのでバッチ可否を再判定させる
                 foreach (var (name, displayMode, append) in chain)
                 {
                     try
@@ -116,7 +158,7 @@ namespace ZiView
                     WriteLog($"Model precision: {(isFp16 ? "fp16" : "fp32")}");
                 }
 
-                StatusText.Text = $"Mode: {_activeEngineMode}";
+                StatusText.Dispatcher.Invoke(() => StatusText.Text = $"Mode: {_activeEngineMode}");
                 WriteLog($"Inference Session context bound. Input: {_inputName}");
 
                 // 初回のGPU/TensorRT初期化遅延を起動時に消化しておく
@@ -125,7 +167,7 @@ namespace ZiView
             catch (Exception ex)
             {
                 _activeEngineMode = "Error";
-                StatusText.Text = $"AI Init Error";
+                Dispatcher.Invoke(() => StatusText.Text = "AI Init Error");
                 WriteLog($"CRITICAL ENGINE ABEND: {ex}");
             }
         }
@@ -138,20 +180,48 @@ namespace ZiView
         {
             if (_onnxSession == null || string.IsNullOrEmpty(_inputName)) return;
 
+            int sz = _fixedInputSize ?? (GetTileSizeForModel(_config.SelectedModel) + 16);
+
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                int sz = _fixedInputSize ?? (GetTileSizeForModel(_config.SelectedModel) + 16);
-
                 // 固定サイズ（または標準272x272）の黒画像を生成して既存のProcessTileを通す
                 using var dummyMat = new Mat(sz, sz, MatType.CV_8UC3, Scalar.All(0));
                 using var resultMat = ProcessTile(dummyMat);
-
-                WriteLog($"[AI] Engine warmup complete in {sw.Elapsed.TotalMilliseconds:F0}ms.");
+                WriteLog($"[AI] Engine warmup (batch=1) complete in {sw.Elapsed.TotalMilliseconds:F0}ms.");
             }
             catch (Exception ex)
             {
                 WriteLog($"[AI] Engine warmup skipped/failed: {ex.Message}");
+                return; // batch=1すら失敗する状況でバッチwarmupを試みても無意味
+            }
+
+            // TensorRT等はバッチサイズごとに別の最適化プロファイルを初回コンパイルするため、
+            // 本番で使うバッチサイズ(TileBatchSize)もここで一度流して事前コンパイルさせておく。
+            // これを怠ると、実ページの初回表示でこのコンパイル待ち（数十秒）がそのままUIフリーズとして
+            // 表面化する（実測で発生していた問題）。固定形状モデルはバッチ非対応の可能性が高いため対象外。
+            if (_fixedInputSize.HasValue) return;
+
+            var dummies = new List<Mat>();
+            try
+            {
+                var swBatch = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < TileBatchSize; i++)
+                    dummies.Add(new Mat(sz, sz, MatType.CV_8UC3, Scalar.All(0)));
+
+                var results = ProcessTileBatch(dummies);
+                foreach (var r in results) r.Dispose();
+                WriteLog($"[AI] Engine warmup (batch={TileBatchSize}) complete in {swBatch.Elapsed.TotalMilliseconds:F0}ms.");
+            }
+            catch (Exception exBatch)
+            {
+                _batchInferenceSupported = false;
+                WriteLog($"[AI] Batch warmup (batch={TileBatchSize}) failed ({exBatch.Message}). " +
+                         "Batch inference disabled for this session; using per-tile processing instead.");
+            }
+            finally
+            {
+                foreach (var d in dummies) d.Dispose();
             }
         }
 
@@ -411,7 +481,7 @@ namespace ZiView
             _inputName = null;
 
             StatusText.Text = "Mode: Loading model...";
-            InitializeAi(modelFileName);
+            await InitializeAiWithOverlayAsync(modelFileName);
 
             // モデル切替後、表示中ページをAI再変換
             if (_imageList.Count > 0)
@@ -462,8 +532,104 @@ namespace ZiView
             return result;
         }
 
+        /// <summary>
+        /// nvidia-smiを叩いて現在の空きVRAM(MB)を取得する。3秒間キャッシュして呼び出しコストを抑える。
+        /// nvidia-smiが無い環境（Intel/AMD/OpenVINO運用等）では-1（不明）を返し、呼び出し元は
+        /// 「判定不能＝安全側（一括推論を見送りタイル分割）」として扱う。
+        /// </summary>
+        private long GetFreeVramMB()
+        {
+            if (_lastFreeVramMB >= 0 && _vramCheckStopwatch.Elapsed.TotalSeconds < 3)
+                return _lastFreeVramMB;
+
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "nvidia-smi",
+                    Arguments = "--query-gpu=memory.free --format=csv,noheader,nounits",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                string output = proc!.StandardOutput.ReadToEnd();
+                proc.WaitForExit(1000);
+                string firstLine = output.Split('\n')[0].Trim();
+                if (long.TryParse(firstLine, out long freeMb))
+                {
+                    _lastFreeVramMB = freeMb;
+                    _vramCheckStopwatch.Restart();
+                    return freeMb;
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"[AI] VRAM query unavailable (non-NVIDIA environment?): {ex.Message}");
+            }
+
+            _lastFreeVramMB = -1;
+            _vramCheckStopwatch.Restart();
+            return -1;
+        }
+
+        /// <summary>
+        /// 全画面一括推論（タイル分割なし）を試みてよい条件かを判定する。
+        /// ・固定形状モデルは全画面入力を受け付けられないため対象外
+        /// ・CPU Modeでの巨大一括推論はかえって遅くなりやすいため対象外
+        /// ・長辺が閾値超、または空きVRAMが閾値未満（判定不能時は安全側でタイル分割）なら対象外
+        /// </summary>
+        private bool TryGetFullFrameEligible(Mat input, out string reason)
+        {
+            if (_fixedInputSize.HasValue) { reason = "fixed-shape model"; return false; }
+            if (_activeEngineMode.StartsWith("CPU")) { reason = "CPU mode"; return false; }
+
+            int longSide = Math.Max(input.Width, input.Height);
+            if (longSide > FullFrameMaxLongSidePx)
+            {
+                reason = $"image too large ({input.Width}x{input.Height})";
+                return false;
+            }
+
+            long freeVram = GetFreeVramMB();
+            if (freeVram < FullFrameMinFreeVramMB) // -1(不明)も含め安全側でfalse
+            {
+                reason = freeVram < 0 ? "VRAM unknown" : $"free VRAM low ({freeVram}MB)";
+                return false;
+            }
+
+            reason = $"{freeVram}MB free VRAM, {input.Width}x{input.Height}";
+            return true;
+        }
+
         private Mat PerformAiTiled(Mat input, CancellationToken token, IProgress<(int done, int total)>? progress = null)
         {
+            // 条件を満たせばタイル分割自体を回避し、画像全体を1回のRunで処理する。
+            // 失敗した場合（Dynamic Shape非対応モデル等）は例外を握りタイル分割へフォールバックする。
+            if (TryGetFullFrameEligible(input, out string ffReason))
+            {
+                try
+                {
+                    var swFull = System.Diagnostics.Stopwatch.StartNew();
+                    WriteLog($"[AI] Attempting full-frame inference ({ffReason}).");
+                    progress?.Report((0, 1));
+                    var fullResult = ProcessTile(input);
+                    progress?.Report((1, 1));
+                    WriteLog($"[AI] Full-frame inference succeeded: {input.Width}x{input.Height} -> " +
+                             $"{fullResult.Width}x{fullResult.Height} in {swFull.Elapsed.TotalMilliseconds:F0}ms.");
+                    return fullResult;
+                }
+                catch (Exception exFull)
+                {
+                    WriteLog($"[AI] Full-frame inference failed ({exFull.Message}). Falling back to tiled inference.");
+                }
+            }
+
+            else
+            {
+                WriteLog($"[AI] Full-frame inference skipped ({ffReason}). Using tiled+batched path.");
+            }
+
             int tileSize = GetTileSizeForModel(_config.SelectedModel);
             int overlap = 16;
 
@@ -522,37 +688,76 @@ namespace ZiView
             }
             probeResult.Dispose();
 
-            int tileIndex = 0;
-            var swTile = System.Diagnostics.Stopwatch.StartNew();
-            var swLogThrottle = System.Diagnostics.Stopwatch.StartNew(); // タイル毎ログの間引き用（一定時間おきのみ出力）
+            int targetWAll = _fixedInputSize ?? standardTileSize;
+            int targetHAll = _fixedInputSize ?? standardTileSize;
 
+            // 残り全タイルの座標だけを先に列挙し（Matはまだ作らない）、TileBatchSize件ずつにまとめて
+            // 1回のSession.Runへ一括投入する。カーネル起動回数がタイル数→バッチ数に減るのが狙い。
+            var tileDescs = new List<(int x, int y, int cw, int ch)>();
             for (int y = 0; y < inHeight; y += tileSize)
             {
                 for (int x = 0; x < inWidth; x += tileSize)
                 {
-                    token.ThrowIfCancellationRequested();
-                    tileIndex++;
                     if (x == 0 && y == 0) continue; // プローブで処理済み
-
                     int cw = Math.Min(tileSize + overlap, inWidth - x);
                     int ch = Math.Min(tileSize + overlap, inHeight - y);
-                    int targetW = _fixedInputSize ?? standardTileSize;
-                    int targetH = _fixedInputSize ?? standardTileSize;
+                    tileDescs.Add((x, y, cw, ch));
+                }
+            }
 
-                    swTile.Restart();
-                    Mat up;
-                    using (var tile = new Mat(input, new OpenCvSharp.Rect(x, y, cw, ch)))
-                    using (var padded = PadToTarget(tile, targetW, targetH))
+            int tileIndex = 1; // プローブ分を1件消化済みとして数える
+            var swBatch = System.Diagnostics.Stopwatch.StartNew();
+            var swLogThrottle = System.Diagnostics.Stopwatch.StartNew(); // ログの間引き用（一定時間おきのみ出力）
+
+            for (int batchStart = 0; batchStart < tileDescs.Count; batchStart += TileBatchSize)
+            {
+                token.ThrowIfCancellationRequested();
+                int batchCount = Math.Min(TileBatchSize, tileDescs.Count - batchStart);
+
+                var paddedTiles = new List<Mat>(batchCount);
+                for (int i = 0; i < batchCount; i++)
+                {
+                    var (x, y, cw, ch) = tileDescs[batchStart + i];
+                    using var tile = new Mat(input, new OpenCvSharp.Rect(x, y, cw, ch));
+                    paddedTiles.Add(PadToTarget(tile, targetWAll, targetHAll));
+                }
+
+                swBatch.Restart();
+                List<Mat> results;
+                if (_batchInferenceSupported && batchCount > 1)
+                {
+                    try
                     {
-                        up = ProcessTile(padded);
+                        results = ProcessTileBatch(paddedTiles);
                     }
-                    // タイル数分毎回ログを出すとI/Oが無視できないオーバーヘッドになるため、
-                    // 約300msおき＋最終タイルのみに間引く（進捗OSD自体は毎回更新するので体感には影響しない）
+                    catch (Exception exBatch)
+                    {
+                        // TensorRTエンジンが静的バッチ=1でビルドされている場合等はここに落ちる。
+                        // Dynamic Batch(Min=1,Opt=35,Max=64)非対応と判断し、以降このセッションでは
+                        // 1タイルずつのProcessTileへ切り替える（正しさを優先）。
+                        _batchInferenceSupported = false;
+                        WriteLog($"[AI] Batched inference rejected ({exBatch.Message}). " +
+                                 "Falling back to per-tile inference for this session (needs Dynamic Batch profile on the TensorRT engine).");
+                        results = paddedTiles.Select(ProcessTile).ToList();
+                    }
+                }
+                else
+                {
+                    results = paddedTiles.Select(ProcessTile).ToList();
+                }
+                foreach (var p in paddedTiles) p.Dispose();
+
+                for (int i = 0; i < batchCount; i++)
+                {
+                    var (x, y, cw, ch) = tileDescs[batchStart + i];
+                    var up = results[i];
+                    tileIndex++;
+
                     bool isLastTile = tileIndex == totalTiles;
                     if (isLastTile || swLogThrottle.Elapsed.TotalMilliseconds >= 300)
                     {
-                        WriteLog($"[AI] Tile {tileIndex}/{totalTiles} (x={x},y={y},{cw}x{ch} padded->{targetW}x{targetH}) " +
-                                 $"-> {up.Width}x{up.Height} in {swTile.Elapsed.TotalMilliseconds:F0}ms");
+                        WriteLog($"[AI] Tile {tileIndex}/{totalTiles} (x={x},y={y},{cw}x{ch}, batch={batchCount}) " +
+                                 $"-> {up.Width}x{up.Height} in {swBatch.Elapsed.TotalMilliseconds:F0}ms/batch");
                         swLogThrottle.Restart();
                     }
                     progress?.Report((tileIndex, totalTiles));
@@ -575,8 +780,152 @@ namespace ZiView
                     up.Dispose();
                 }
             }
-            WriteLog($"[AI] All {totalTiles} tiles done. Output: {output.Width}x{output.Height}");
+            WriteLog($"[AI] All {totalTiles} tiles done (batchSize={TileBatchSize}). Output: {output.Width}x{output.Height}");
             return output;
+        }
+
+        /// <summary>
+        /// 同一サイズにパディング済みのタイル群を1つのバッチテンソル[N,3,H,W]にまとめ、
+        /// Session.Runを1回だけ呼び出す。カーネル起動オーバーヘッドをタイル数→バッチ数に削減する。
+        /// TensorRT利用時は、エンジン構築時のOptimization ProfileがDynamic Batch
+        /// （Min=1, Opt=TileBatchSize, Max=64程度）に対応している必要がある。
+        /// 非対応の場合はここで例外になり、呼び出し元がper-tile処理へフォールバックする。
+        /// </summary>
+        [ThreadStatic] private static float[]? _batchInputBuffer;
+        [ThreadStatic] private static Float16[]? _batchInputBufferFp16;
+
+        private List<Mat> ProcessTileBatch(List<Mat> tiles)
+        {
+            int n = tiles.Count;
+            int w = tiles[0].Width, h = tiles[0].Height;
+            bool useFp16 = _inputName != null && _onnxSession!.InputMetadata[_inputName].ElementType == typeof(Float16);
+
+            int perTile = 3 * w * h;
+            int required = n * perTile;
+            List<NamedOnnxValue> inputs;
+
+            // Pinned Memory対応：バッチ用バッファをスレッドごとに使い回し、Run()実行中は
+            // GCHandleで明示的にピン留めする。毎バッチ new float[n*perTile]（数十MB）していた
+            // アロケーション＆GC負荷を解消し、GCによる再配置リスクも無くす。
+            GCHandle pinHandle = default;
+            bool pinned = false;
+            try
+            {
+                if (useFp16)
+                {
+                    if (_batchInputBufferFp16 == null || _batchInputBufferFp16.Length < required)
+                        _batchInputBufferFp16 = new Float16[required];
+                    var data16 = _batchInputBufferFp16;
+                    pinHandle = GCHandle.Alloc(data16, GCHandleType.Pinned);
+                    pinned = true;
+
+                    Parallel.For(0, n, ti =>
+                    {
+                        using var rgb = new Mat();
+                        Cv2.CvtColor(tiles[ti], rgb, ColorConversionCodes.BGR2RGB);
+                        var idx = rgb.GetUnsafeGenericIndexer<Vec3b>();
+                        int baseOff = ti * perTile;
+                        for (int y = 0; y < h; y++)
+                            for (int x = 0; x < w; x++)
+                            {
+                                var v = idx[y, x];
+                                data16[baseOff + 0 * w * h + y * w + x] = (Float16)(v.Item0 / 255f);
+                                data16[baseOff + 1 * w * h + y * w + x] = (Float16)(v.Item1 / 255f);
+                                data16[baseOff + 2 * w * h + y * w + x] = (Float16)(v.Item2 / 255f);
+                            }
+                    });
+                    var tensor16 = required == data16.Length
+                        ? new DenseTensor<Float16>(data16, new[] { n, 3, h, w })
+                        : new DenseTensor<Float16>(new Memory<Float16>(data16, 0, required), new[] { n, 3, h, w });
+                    inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_inputName ?? "input", tensor16) };
+                }
+                else
+                {
+                    if (_batchInputBuffer == null || _batchInputBuffer.Length < required)
+                        _batchInputBuffer = new float[required];
+                    var data = _batchInputBuffer;
+                    pinHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
+                    pinned = true;
+
+                    Parallel.For(0, n, ti =>
+                    {
+                        using var rgb = new Mat();
+                        Cv2.CvtColor(tiles[ti], rgb, ColorConversionCodes.BGR2RGB);
+                        var idx = rgb.GetUnsafeGenericIndexer<Vec3b>();
+                        int baseOff = ti * perTile;
+                        for (int y = 0; y < h; y++)
+                            for (int x = 0; x < w; x++)
+                            {
+                                var v = idx[y, x];
+                                data[baseOff + 0 * w * h + y * w + x] = v.Item0 / 255f;
+                                data[baseOff + 1 * w * h + y * w + x] = v.Item1 / 255f;
+                                data[baseOff + 2 * w * h + y * w + x] = v.Item2 / 255f;
+                            }
+                    });
+                    var tensor = required == data.Length
+                        ? new DenseTensor<float>(data, new[] { n, 3, h, w })
+                        : new DenseTensor<float>(new Memory<float>(data, 0, required), new[] { n, 3, h, w });
+                    inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_inputName ?? "input", tensor) };
+                }
+
+                using var results = _onnxSession!.Run(inputs);
+                return ConvertBatchResults(results, n, useFp16);
+            }
+            finally
+            {
+                if (pinned) pinHandle.Free();
+            }
+        }
+
+        /// <summary>Session.Runの出力テンソルをタイルごとのMatへ分解する（ProcessTileBatchから分離）。</summary>
+        private List<Mat> ConvertBatchResults(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results, int n, bool useFp16)
+        {
+            var outList = new List<Mat>(n);
+
+            if (useFp16)
+            {
+                var output16 = results.First().AsTensor<Float16>();
+                int outH = output16.Dimensions[2], outW = output16.Dimensions[3];
+                for (int ti = 0; ti < n; ti++)
+                {
+                    var res = new Mat(outH, outW, MatType.CV_8UC3);
+                    var resIdx = res.GetUnsafeGenericIndexer<Vec3b>();
+                    int t = ti;
+                    Parallel.For(0, outH, y =>
+                    {
+                        for (int x = 0; x < outW; x++)
+                        {
+                            resIdx[y, x] = new Vec3b(
+                                (byte)Math.Clamp((float)output16[t, 2, y, x] * 255, 0, 255),
+                                (byte)Math.Clamp((float)output16[t, 1, y, x] * 255, 0, 255),
+                                (byte)Math.Clamp((float)output16[t, 0, y, x] * 255, 0, 255));
+                        }
+                    });
+                    outList.Add(res);
+                }
+                return outList;
+            }
+
+            var output = results.First().AsTensor<float>();
+            int oH = output.Dimensions[2], oW = output.Dimensions[3];
+            for (int ti = 0; ti < n; ti++)
+            {
+                var res = new Mat(oH, oW, MatType.CV_8UC3);
+                var resIdx = res.GetUnsafeGenericIndexer<Vec3b>();
+                int t = ti;
+                Parallel.For(0, oH, y =>
+                {
+                    for (int x = 0; x < oW; x++)
+                    {
+                        resIdx[y, x] = new Vec3b(
+                            (byte)Math.Clamp(output[t, 2, y, x] * 255, 0, 255),
+                            (byte)Math.Clamp(output[t, 1, y, x] * 255, 0, 255),
+                            (byte)Math.Clamp(output[t, 0, y, x] * 255, 0, 255));
+                    }
+                });
+                outList.Add(res);
+            }
+            return outList;
         }
 
         [ThreadStatic] private static Float16[]? _tileInputBufferFp16;
