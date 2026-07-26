@@ -285,6 +285,12 @@
                                 <TextBlock Text="初回のみビルドで低速、2回目以降は同一モデル・同一環境なら高速起動になります。"
                                            Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
+                                <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
+
+                                <CheckBox x:Name="TileBatchingCheckBox" Content="タイルをバッチ処理する（複数タイルをまとめて1回のGPU推論に投入）" Margin="0,0,0,4"/>
+                                <TextBlock Text="ONだとカーネル起動回数が減り高速化しますが、瞬間的なVRAM使用量のピークが大きくなります。VRAMがギリギリの環境ではOFF（1タイルずつのDynamic Shape推論）の方が全体として健全・高速な場合があります。変更は次回のAIエンジン初期化時から反映されます。"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>

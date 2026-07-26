@@ -75,6 +75,7 @@ namespace ZiView
             RadioCuda.IsChecked = _config.EnginePreference == "CUDA";
             RadioOpenVino.IsChecked = _config.EnginePreference == "OpenVINO";
             TrtCacheCheckBox.IsChecked = _config.TensorRtEngineCacheEnabled;
+            TileBatchingCheckBox.IsChecked = _config.EnableTileBatching;
             RadioRamDiskForceOn.IsChecked = _config.TrtCacheRamDiskOverride == "ForceOn";
             RadioRamDiskForceOff.IsChecked = _config.TrtCacheRamDiskOverride == "ForceOff";
             RadioRamDiskAuto.IsChecked = _config.TrtCacheRamDiskOverride != "ForceOn" && _config.TrtCacheRamDiskOverride != "ForceOff";
@@ -278,6 +279,7 @@ namespace ZiView
                 : (RadioOpenVino.IsChecked == true) ? "OpenVINO"
                 : "TensorRT";
             _config.TensorRtEngineCacheEnabled = TrtCacheCheckBox.IsChecked ?? true;
+            _config.EnableTileBatching = TileBatchingCheckBox.IsChecked ?? false;
             _config.TrtCacheRamDiskOverride = (RadioRamDiskForceOn.IsChecked == true) ? "ForceOn"
                 : (RadioRamDiskForceOff.IsChecked == true) ? "ForceOff"
                 : "Auto";

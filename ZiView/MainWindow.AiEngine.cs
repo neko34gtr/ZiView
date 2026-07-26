@@ -43,6 +43,16 @@ namespace ZiView
         // 失敗のたびに30〜90秒以上のエンジンビルド失敗コストを毎ページ払い続けるのを防ぐため。
         private bool _fullFrameSupported = true;
 
+        // InitializeAiの多重同時実行を防ぐフラグ。
+        // 「表示時にセッションがnullなら自動再初期化」という既存の保険ロジック（MainWindow.Display.cs）が、
+        // 起動直後や名前付きパイプ経由の二重オープン等でTask.Run中のInitializeAiとほぼ同時に走ると、
+        // TensorRT/CUDAセッション構築＋ウォームアップが2つ同時にVRAMを取り合い、
+        // 実測でVRAM逼迫→OOM（ConvTranspose内でのbad allocation等）→システムメモリ側の
+        // 小さなアロケーション（867KB程度）まで失敗する連鎖を引き起こしていた。
+        // ロック待ちにはしない（Dispatcher.Invokeを内部で使うためUIスレッドからの呼び出しでデッドロックしうる）。
+        // 単純にスキップするだけで、後続のページ表示や自動再init機会で改めて拾われる。
+        private volatile bool _aiInitInProgress = false;
+
         // nvidia-smi呼び出しは数十msかかるため、直近の空きVRAM値を一定時間キャッシュして使い回す
         private long _lastFreeVramMB = -1;
         private readonly System.Diagnostics.Stopwatch _vramCheckStopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -78,6 +88,24 @@ namespace ZiView
         }
 
         private void InitializeAi(string modelFileName)
+        {
+            if (_aiInitInProgress)
+            {
+                WriteLog("[AI] InitializeAi already in progress on another thread; skipping duplicate call.");
+                return;
+            }
+            _aiInitInProgress = true;
+            try
+            {
+                InitializeAiCore(modelFileName);
+            }
+            finally
+            {
+                _aiInitInProgress = false;
+            }
+        }
+
+        private void InitializeAiCore(string modelFileName)
         {
             try
             {
@@ -208,28 +236,37 @@ namespace ZiView
             // 本番で使うバッチサイズ(TileBatchSize)もここで一度流して事前コンパイルさせておく。
             // これを怠ると、実ページの初回表示でこのコンパイル待ち（数十秒）がそのままUIフリーズとして
             // 表面化する（実測で発生していた問題）。固定形状モデルはバッチ非対応の可能性が高いため対象外。
-            if (_fixedInputSize.HasValue) return;
-
-            var dummies = new List<Mat>();
-            try
+            if (!_config.EnableTileBatching)
             {
-                var swBatch = System.Diagnostics.Stopwatch.StartNew();
-                for (int i = 0; i < TileBatchSize; i++)
-                    dummies.Add(new Mat(sz, sz, MatType.CV_8UC3, Scalar.All(0)));
-
-                var results = ProcessTileBatch(dummies);
-                foreach (var r in results) r.Dispose();
-                WriteLog($"[AI] Engine warmup (batch={TileBatchSize}) complete in {swBatch.Elapsed.TotalMilliseconds:F0}ms.");
+                WriteLog("[AI] Tile batching disabled by config; using per-tile inference (batch warmup skipped).");
             }
-            catch (Exception exBatch)
+            else if (_fixedInputSize.HasValue)
             {
-                _batchInferenceSupported = false;
-                WriteLog($"[AI] Batch warmup (batch={TileBatchSize}) failed ({exBatch.Message}). " +
-                         "Batch inference disabled for this session; using per-tile processing instead.");
+                // 固定形状モデルのため対象外（何もしない）
             }
-            finally
+            else
             {
-                foreach (var d in dummies) d.Dispose();
+                var dummies = new List<Mat>();
+                try
+                {
+                    var swBatch = System.Diagnostics.Stopwatch.StartNew();
+                    for (int i = 0; i < TileBatchSize; i++)
+                        dummies.Add(new Mat(sz, sz, MatType.CV_8UC3, Scalar.All(0)));
+
+                    var results = ProcessTileBatch(dummies);
+                    foreach (var r in results) r.Dispose();
+                    WriteLog($"[AI] Engine warmup (batch={TileBatchSize}) complete in {swBatch.Elapsed.TotalMilliseconds:F0}ms.");
+                }
+                catch (Exception exBatch)
+                {
+                    _batchInferenceSupported = false;
+                    WriteLog($"[AI] Batch warmup (batch={TileBatchSize}) failed ({exBatch.Message}). " +
+                             "Batch inference disabled for this session; using per-tile processing instead.");
+                }
+                finally
+                {
+                    foreach (var d in dummies) d.Dispose();
+                }
             }
 
             // 全画面一括推論も、実ページで初めて試すと失敗時に30〜90秒級のコストが表面化するため、
@@ -972,7 +1009,7 @@ namespace ZiView
 
                 swBatch.Restart();
                 List<Mat> results;
-                if (_batchInferenceSupported && batchCount > 1)
+                if (_config.EnableTileBatching && _batchInferenceSupported && batchCount > 1)
                 {
                     try
                     {

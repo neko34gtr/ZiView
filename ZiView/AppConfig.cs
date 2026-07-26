@@ -78,5 +78,11 @@ namespace ZiView
         // ONにすると初回のみ低速（エンジンビルド）、2回目以降は大幅に高速化される。
         // ディスク容量が気になる場合はOFFにするか、SettingsWindowからキャッシュを削除できる。
         public bool TensorRtEngineCacheEnabled { get; set; } = true;
+
+        // タイルを複数枚まとめて1回のGPU推論(Run)に投入するか。
+        // ONだとカーネル起動回数は減るが、瞬間的なVRAM使用量のピークが跳ね上がる
+        // （実測でVRAM 7.6/8GB・システムメモリのページングまで発生する環境があったため既定OFFに変更）。
+        // OFFの場合は従来通り1タイルずつDynamic Shapeで推論する（バッチ化以前の挙動）。
+        public bool EnableTileBatching { get; set; } = false;
     }
 }

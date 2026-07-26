@@ -258,7 +258,10 @@ namespace ZiView
                         if (_onnxSession == null && !string.IsNullOrEmpty(_config.SelectedModel))
                         {
                             WriteLog("Session missing on display. Attempting automatic reinit.");
-                            InitializeAi(_config.SelectedModel);
+                            // 同期呼び出しだとUIスレッドをTensorRT構築完了までブロックしてしまう上、
+                            // 起動直後の初期化とほぼ同時に走ると二重にVRAMを取り合いOOMを誘発したことがあるため、
+                            // オーバーレイ付き非同期版（内部で多重実行防止ガード済み）を使う。
+                            await InitializeAiWithOverlayAsync(_config.SelectedModel);
                         }
 
                         if (_onnxSession != null && _inputName != null)
