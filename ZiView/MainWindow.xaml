@@ -441,6 +441,8 @@
                             <TextBlock Text="システムモニター" Style="{StaticResource SectionLabel}"/>
                             <TextBlock x:Name="StatusText" Text="Ready" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" FontSize="12"/>
                             <TextBlock x:Name="MemoryText" Text="RAM: -- MB" Foreground="{StaticResource AccentBrush}" Margin="0,8,0,0" FontSize="12" FontWeight="SemiBold"/>
+                            <!-- 追加 -->
+                            <TextBlock x:Name="GpuText" Text="GPU: --% (VRAM: -- MB)" Foreground="{StaticResource AccentBrush}" Margin="0,4,0,0" FontSize="12" FontWeight="SemiBold"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
