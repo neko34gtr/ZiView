@@ -215,6 +215,8 @@ namespace ZiView
                 _config.CheckPrefetch = CheckPrefetch.IsChecked ?? true;
                 _config.PrefetchPageCount = (int)PrefetchCountSlider.Value;
                 _config.EnableAiInference = CheckAiEnable.IsChecked ?? true;
+                _config.EnableTileBatching = CheckTileBatching.IsChecked ?? false;
+                _config.TileBatchSize = (int)TileBatchSizeSlider.Value;
                 _config.ShowReticle = CheckReticle.IsChecked ?? true;
                 _config.SplitSliderValue = SplitSlider.Value;
                 _config.LastSourcePath = _currentSourcePath ?? string.Empty;
@@ -268,6 +270,11 @@ namespace ZiView
             PrefetchCountSlider.Value = prefetchCount;
             PrefetchCountText.Text = $"{prefetchCount}ページ先読み";
 
+            CheckTileBatching.IsChecked = _config.EnableTileBatching;
+            int tileBatchSize = Math.Clamp(_config.TileBatchSize, 1, 64);
+            TileBatchSizeSlider.Value = tileBatchSize;
+            TileBatchSizeText.Text = $"{tileBatchSize}枚";
+
             CheckLens.IsChecked = _config.EnableLensCorrection;
             LensSlider.Value = _config.LensCorrectionAmount;
 
@@ -293,6 +300,14 @@ namespace ZiView
             {
                 WriteLog($"Background Apply Error: {ex.Message}");
             }
+        }
+
+        private void OnTileBatchingChanged(object sender, RoutedEventArgs e) => SaveConfig();
+
+        private void OnTileBatchSizeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (TileBatchSizeText != null) TileBatchSizeText.Text = $"{(int)e.NewValue}枚";
+            SaveConfig();
         }
 
         private void SetupEvents()

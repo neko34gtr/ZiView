@@ -23,6 +23,7 @@ namespace ZiView
         private InferenceSession? _onnxSession;
         private string? _inputName;
         private int? _fixedInputSize;
+        private bool _isFp16Model = true;
         private bool _isUpdatingModelComboInternal = false;
         private string _activeEngineMode = "Unknown";
 
@@ -32,8 +33,19 @@ namespace ZiView
         //   万一不足していてもTryFullFrame側のtry/catchでタイル分割へ自動フォールバックするため安全。
         private const int FullFrameMaxLongSidePx = 3840;
         private const long FullFrameMinFreeVramMB = 6144;
-        // タイルバッチ推論の1回あたり最大タイル数（TensorRT Dynamic Batch Opt=35を想定）
-        private const int TileBatchSize = 35;
+        // タイルバッチ推論の1回あたり最大タイル数。
+        // ユーザー設定値(AppConfig.TileBatchSize、既定35, 1〜64)を基本としつつ、
+        // fp32モデル（fp16の約2倍のメモリを使い、VRAM逼迫→システムメモリへのスワップで
+        // 実機がハングした実例がある）を検出した場合は自動的に8以下へ制限する。
+        // ユーザーがスライダー等で明示的に小さい値を選んでいればそちらを優先する（Minを取るだけなので下げる分には常に反映される）。
+        private int EffectiveTileBatchSize
+        {
+            get
+            {
+                int configured = Math.Clamp(_config.TileBatchSize, 1, 64);
+                return _isFp16Model ? configured : Math.Min(configured, 8);
+            }
+        }
 
         // バッチ推論がモデル/エンジン側で拒否された場合（固定バッチ=1のTensorRTエンジン等）、
         // そのセッション中は繰り返し失敗させず1タイルずつの処理へ切り替える
@@ -181,6 +193,7 @@ namespace ZiView
                 // 例: Nomos2系は [1,3,256,256] のように高さ/幅が固定されており、
                 // タイルの端数サイズをそのまま渡すと InvalidArgument で必ず失敗する。
                 _fixedInputSize = null;
+                _isFp16Model = true; // メタデータ取得前の既定値（fp32検出できなければ安全側でfp16扱い＝制限をかけない）
                 if (_inputName != null)
                 {
                     var meta = _onnxSession.InputMetadata[_inputName];
@@ -190,8 +203,8 @@ namespace ZiView
                         _fixedInputSize = Math.Max(dims[2], dims[3]);
                         WriteLog($"Model requires fixed input shape: {dims[2]}x{dims[3]}");
                     }
-                    bool isFp16 = meta.ElementType == typeof(Float16);
-                    WriteLog($"Model precision: {(isFp16 ? "fp16" : "fp32")}");
+                    _isFp16Model = meta.ElementType == typeof(Float16);
+                    WriteLog($"Model precision: {(_isFp16Model ? "fp16" : "fp32")}");
                 }
 
                 StatusText.Dispatcher.Invoke(() => StatusText.Text = $"Mode: {_activeEngineMode}");
@@ -233,7 +246,7 @@ namespace ZiView
             }
 
             // TensorRT等はバッチサイズごとに別の最適化プロファイルを初回コンパイルするため、
-            // 本番で使うバッチサイズ(TileBatchSize)もここで一度流して事前コンパイルさせておく。
+            // 本番で使うバッチサイズ(EffectiveTileBatchSize)もここで一度流して事前コンパイルさせておく。
             // これを怠ると、実ページの初回表示でこのコンパイル待ち（数十秒）がそのままUIフリーズとして
             // 表面化する（実測で発生していた問題）。固定形状モデルはバッチ非対応の可能性が高いため対象外。
             if (!_config.EnableTileBatching)
@@ -250,17 +263,17 @@ namespace ZiView
                 try
                 {
                     var swBatch = System.Diagnostics.Stopwatch.StartNew();
-                    for (int i = 0; i < TileBatchSize; i++)
+                    for (int i = 0; i < EffectiveTileBatchSize; i++)
                         dummies.Add(new Mat(sz, sz, MatType.CV_8UC3, Scalar.All(0)));
 
                     var results = ProcessTileBatch(dummies);
                     foreach (var r in results) r.Dispose();
-                    WriteLog($"[AI] Engine warmup (batch={TileBatchSize}) complete in {swBatch.Elapsed.TotalMilliseconds:F0}ms.");
+                    WriteLog($"[AI] Engine warmup (batch={EffectiveTileBatchSize}) complete in {swBatch.Elapsed.TotalMilliseconds:F0}ms.");
                 }
                 catch (Exception exBatch)
                 {
                     _batchInferenceSupported = false;
-                    WriteLog($"[AI] Batch warmup (batch={TileBatchSize}) failed ({exBatch.Message}). " +
+                    WriteLog($"[AI] Batch warmup (batch={EffectiveTileBatchSize}) failed ({exBatch.Message}). " +
                              "Batch inference disabled for this session; using per-tile processing instead.");
                 }
                 finally
@@ -976,7 +989,7 @@ namespace ZiView
             int targetWAll = _fixedInputSize ?? standardTileSize;
             int targetHAll = _fixedInputSize ?? standardTileSize;
 
-            // 残り全タイルの座標だけを先に列挙し（Matはまだ作らない）、TileBatchSize件ずつにまとめて
+            // 残り全タイルの座標だけを先に列挙し（Matはまだ作らない）、EffectiveTileBatchSize件ずつにまとめて
             // 1回のSession.Runへ一括投入する。カーネル起動回数がタイル数→バッチ数に減るのが狙い。
             var tileDescs = new List<(int x, int y, int cw, int ch)>();
             for (int y = 0; y < inHeight; y += tileSize)
@@ -994,10 +1007,10 @@ namespace ZiView
             var swBatch = System.Diagnostics.Stopwatch.StartNew();
             var swLogThrottle = System.Diagnostics.Stopwatch.StartNew(); // ログの間引き用（一定時間おきのみ出力）
 
-            for (int batchStart = 0; batchStart < tileDescs.Count; batchStart += TileBatchSize)
+            for (int batchStart = 0; batchStart < tileDescs.Count; batchStart += EffectiveTileBatchSize)
             {
                 token.ThrowIfCancellationRequested();
-                int batchCount = Math.Min(TileBatchSize, tileDescs.Count - batchStart);
+                int batchCount = Math.Min(EffectiveTileBatchSize, tileDescs.Count - batchStart);
 
                 var paddedTiles = new List<Mat>(batchCount);
                 for (int i = 0; i < batchCount; i++)
@@ -1065,7 +1078,7 @@ namespace ZiView
                     up.Dispose();
                 }
             }
-            WriteLog($"[AI] All {totalTiles} tiles done (batchSize={TileBatchSize}). Output: {output.Width}x{output.Height}");
+            WriteLog($"[AI] All {totalTiles} tiles done (batchSize={EffectiveTileBatchSize}). Output: {output.Width}x{output.Height}");
             return output;
         }
 
@@ -1073,7 +1086,7 @@ namespace ZiView
         /// 同一サイズにパディング済みのタイル群を1つのバッチテンソル[N,3,H,W]にまとめ、
         /// Session.Runを1回だけ呼び出す。カーネル起動オーバーヘッドをタイル数→バッチ数に削減する。
         /// TensorRT利用時は、エンジン構築時のOptimization ProfileがDynamic Batch
-        /// （Min=1, Opt=TileBatchSize, Max=64程度）に対応している必要がある。
+        /// （Min=1, Opt=EffectiveTileBatchSize, Max=64程度）に対応している必要がある。
         /// 非対応の場合はここで例外になり、呼び出し元がper-tile処理へフォールバックする。
         /// </summary>
         [ThreadStatic] private static float[]? _batchInputBuffer;

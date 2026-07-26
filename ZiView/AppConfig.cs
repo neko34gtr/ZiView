@@ -84,5 +84,9 @@ namespace ZiView
         // （実測でVRAM 7.6/8GB・システムメモリのページングまで発生する環境があったため既定OFFに変更）。
         // OFFの場合は従来通り1タイルずつDynamic Shapeで推論する（バッチ化以前の挙動）。
         public bool EnableTileBatching { get; set; } = false;
+
+        // タイルバッチ推論の1回あたり最大タイル数（1〜64、既定35）。
+        // fp32モデル選択時はコード側で自動的に8以下へ制限される（AppConfig側では制限しない＝生の希望値を保持）。
+        public int TileBatchSize { get; set; } = 35;
     }
 }

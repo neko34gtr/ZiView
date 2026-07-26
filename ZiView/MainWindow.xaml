@@ -377,6 +377,26 @@
 
                     <Border Style="{StaticResource CardPanel}">
                         <StackPanel>
+                            <TextBlock Text="AI推論パフォーマンス" Style="{StaticResource SectionLabel}"/>
+                            <CheckBox x:Name="CheckTileBatching" Content="タイルをバッチ処理する" IsChecked="False" Click="OnTileBatchingChanged"/>
+                            <Grid Margin="0,0,0,4" IsEnabled="{Binding IsChecked, ElementName=CheckTileBatching}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Slider x:Name="TileBatchSizeSlider" Grid.Column="0" Minimum="1" Maximum="64" Value="35"
+                                        TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnTileBatchSizeChanged"/>
+                                <TextBlock x:Name="TileBatchSizeText" Grid.Column="1" Text="35枚"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
+                                           Margin="10,0,0,0" VerticalAlignment="Center"/>
+                            </Grid>
+                            <TextBlock Text="ONだと複数タイルを1回のGPU推論にまとめて高速化しますが、瞬間VRAM使用量が増えます。fp32モデルは自動的に8枚以下へ制限されます。変更は次回のAIエンジン初期化時から反映されます。"
+                                       Foreground="{StaticResource TextCaptionBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardPanel}">
+                        <StackPanel>
                             <TextBlock Text="レンズ補正 (K)" Style="{StaticResource SectionLabel}"/>
                             <CheckBox x:Name="CheckLens" Content="補正を有効化" IsChecked="False" Click="OnLensSettingChanged"/>
                             <TextBlock Text="補正量  [ / ]" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,8"/>

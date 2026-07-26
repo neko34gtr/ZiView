@@ -76,6 +76,8 @@ namespace ZiView
             RadioOpenVino.IsChecked = _config.EnginePreference == "OpenVINO";
             TrtCacheCheckBox.IsChecked = _config.TensorRtEngineCacheEnabled;
             TileBatchingCheckBox.IsChecked = _config.EnableTileBatching;
+            TileBatchSizeSlider.Value = Math.Clamp(_config.TileBatchSize, 1, 64);
+            TileBatchSizeValueText.Text = ((int)TileBatchSizeSlider.Value).ToString();
             RadioRamDiskForceOn.IsChecked = _config.TrtCacheRamDiskOverride == "ForceOn";
             RadioRamDiskForceOff.IsChecked = _config.TrtCacheRamDiskOverride == "ForceOff";
             RadioRamDiskAuto.IsChecked = _config.TrtCacheRamDiskOverride != "ForceOn" && _config.TrtCacheRamDiskOverride != "ForceOff";
@@ -103,6 +105,11 @@ namespace ZiView
             TrtCacheDirectoryTextBox.Text = string.IsNullOrWhiteSpace(_selectedTrtCacheDirectory)
                 ? "（未指定：自動判定 — X:\\temp\\ZView\\trt_cache を優先）"
                 : _selectedTrtCacheDirectory;
+        }
+
+        private void TileBatchSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (TileBatchSizeValueText != null) TileBatchSizeValueText.Text = ((int)e.NewValue).ToString();
         }
 
         private void BrowseLogDirectory_Click(object sender, RoutedEventArgs e)
@@ -280,6 +287,7 @@ namespace ZiView
                 : "TensorRT";
             _config.TensorRtEngineCacheEnabled = TrtCacheCheckBox.IsChecked ?? true;
             _config.EnableTileBatching = TileBatchingCheckBox.IsChecked ?? false;
+            _config.TileBatchSize = (int)TileBatchSizeSlider.Value;
             _config.TrtCacheRamDiskOverride = (RadioRamDiskForceOn.IsChecked == true) ? "ForceOn"
                 : (RadioRamDiskForceOff.IsChecked == true) ? "ForceOff"
                 : "Auto";
