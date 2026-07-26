@@ -26,18 +26,22 @@ namespace ZiView
         private bool _isUpdatingModelComboInternal = false;
         private string _activeEngineMode = "Unknown";
 
-        // 全画面一括推論の適用条件（4K以下・空きVRAM1.5GB以上ならタイル分割を回避）
+        // 全画面一括推論の適用条件（4K以下・空きVRAM6GB以上ならタイル分割を回避）
         // ※画像1枚分の入出力テンソル＋中間特徴マップの実所要量は軽量モデルなら数百MB〜1GB程度。
         //   6GBはTensorRTコンテキスト常駐分（数GB）を考慮しない過剰に安全側の値だったため引き下げた。
         //   万一不足していてもTryFullFrame側のtry/catchでタイル分割へ自動フォールバックするため安全。
         private const int FullFrameMaxLongSidePx = 3840;
-        private const long FullFrameMinFreeVramMB = 1536;
+        private const long FullFrameMinFreeVramMB = 6144;
         // タイルバッチ推論の1回あたり最大タイル数（TensorRT Dynamic Batch Opt=35を想定）
         private const int TileBatchSize = 35;
 
         // バッチ推論がモデル/エンジン側で拒否された場合（固定バッチ=1のTensorRTエンジン等）、
         // そのセッション中は繰り返し失敗させず1タイルずつの処理へ切り替える
         private bool _batchInferenceSupported = true;
+
+        // 全画面一括推論が一度でも失敗（形状推論非対応等）したら、そのセッション中は再試行しない。
+        // 失敗のたびに30〜90秒以上のエンジンビルド失敗コストを毎ページ払い続けるのを防ぐため。
+        private bool _fullFrameSupported = true;
 
         // nvidia-smi呼び出しは数十msかかるため、直近の空きVRAM値を一定時間キャッシュして使い回す
         private long _lastFreeVramMB = -1;
@@ -114,6 +118,7 @@ namespace ZiView
 
                 _activeEngineMode = "CPU Mode";
                 _batchInferenceSupported = true; // モデル/エンジンを切り替えたのでバッチ可否を再判定させる
+                _fullFrameSupported = true;       // 同様に全画面一括の可否も再判定させる
                 foreach (var (name, displayMode, append) in chain)
                 {
                     try
@@ -226,6 +231,82 @@ namespace ZiView
             {
                 foreach (var d in dummies) d.Dispose();
             }
+
+            // 全画面一括推論も、実ページで初めて試すと失敗時に30〜90秒級のコストが表面化するため、
+            // 起動時（オーバーレイ表示中）に代表的なサイズで一度試しておく。ここで失敗するモデル/環境は
+            // 実運用でもほぼ確実に失敗するため、_fullFrameSupportedをここで確定させて実ページでの
+            // 無駄な再試行を防ぐ。固定形状モデルは対象外（そもそも全画面を受け付けない）。
+            // 全画面一括推論も、実ページで初めて試すと失敗時に30〜90秒級のコストが表面化するため、
+            // 起動時（オーバーレイ表示中）に代表的なサイズで一度試しておく。ここで失敗するモデル/環境は
+            // 実運用でもほぼ確実に失敗するため、_fullFrameSupportedをここで確定させて実ページでの
+            // 無駄な再試行を防ぐ。固定形状モデルは対象外（そもそも全画面を受け付けない）。
+            //
+            // ただしこの検証自体（特に失敗パターン）がTensorRTのエンジンビルド試行込みで数十〜90秒級かかるため、
+            // 結果をtrt_cacheディレクトリ内にマーカーファイルとして記録し、起動・モデル切替の度に
+            // 同じ検証をやり直さないようにする（マーカーはRAMDISK⇔SSD同期の対象フォルダ内に置くため、
+            // PC再起動でRAMDISKが消えてもSSD側から一緒に復元される）。
+            if (!_fixedInputSize.HasValue)
+            {
+                string markerPath = GetFullFrameMarkerPath();
+                string? cached = ReadFullFrameMarker(markerPath);
+                if (cached == "unsupported")
+                {
+                    _fullFrameSupported = false;
+                    WriteLog("[AI] Full-frame support: cached result = unsupported (skipping re-verification).");
+                }
+                else if (cached == "supported")
+                {
+                    _fullFrameSupported = true;
+                    WriteLog("[AI] Full-frame support: cached result = supported (skipping re-verification).");
+                }
+                else
+                {
+                    try
+                    {
+                        var swFull = System.Diagnostics.Stopwatch.StartNew();
+                        using var dummyFull = new Mat(1200, 1688, MatType.CV_8UC3, Scalar.All(0)); // 代表的なコミックページサイズ
+                        using var resultFull = ProcessTile(dummyFull);
+                        WriteLog($"[AI] Full-frame warmup succeeded in {swFull.Elapsed.TotalMilliseconds:F0}ms. Full-frame inference enabled.");
+                        WriteFullFrameMarker(markerPath, "supported");
+                    }
+                    catch (Exception exFull)
+                    {
+                        _fullFrameSupported = false;
+                        WriteLog($"[AI] Full-frame warmup failed ({exFull.Message}). " +
+                                 "Full-frame inference disabled for this session; using tiled inference only.");
+                        WriteFullFrameMarker(markerPath, "unsupported");
+                    }
+                }
+            }
+        }
+
+        /// <summary>選択中モデル名に紐づく全画面対応可否マーカーのパス（trt_cacheディレクトリ内＝同期対象）。</summary>
+        private string GetFullFrameMarkerPath()
+        {
+            string cacheDir = GetTensorRtCacheDirectory(_config.TensorRtCacheDirectory);
+            string safeModelName = string.Join("_", _config.SelectedModel.Split(Path.GetInvalidFileNameChars()));
+            return Path.Combine(cacheDir, $"{safeModelName}.fullframe_status");
+        }
+
+        private static string? ReadFullFrameMarker(string markerPath)
+        {
+            try
+            {
+                if (!File.Exists(markerPath)) return null;
+                string content = File.ReadAllText(markerPath).Trim();
+                return content == "supported" || content == "unsupported" ? content : null;
+            }
+            catch { return null; }
+        }
+
+        private static void WriteFullFrameMarker(string markerPath, string value)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(markerPath)!);
+                File.WriteAllText(markerPath, value);
+            }
+            catch { /* 書き込めなくても次回また検証し直すだけなので致命的ではない */ }
         }
 
         private void AppendTensorRt(SessionOptions options)
@@ -367,6 +448,22 @@ namespace ZiView
             catch { return false; }
         }
 
+        /// <summary>
+        /// 設定（TrtCacheRamDiskOverride）を優先してRAMDISK扱いかどうかを判定する。
+        /// "Auto"の場合のみDriveTypeによる自動判定（IsRamDisk）にフォールバックする。
+        /// 一部のRAMDISKドライバはFixed扱いで報告され自動判定が外れることがあるため、
+        /// SettingsWindowから強制指定できるようにしてある。
+        /// </summary>
+        private bool IsRamDiskForCache(string path)
+        {
+            return _config.TrtCacheRamDiskOverride switch
+            {
+                "ForceOn" => true,
+                "ForceOff" => false,
+                _ => IsRamDisk(path),
+            };
+        }
+
         private static long GetFreeBytesForPath(string path)
         {
             try
@@ -407,7 +504,7 @@ namespace ZiView
             try
             {
                 string liveCacheDir = GetTensorRtCacheDirectory(_config.TensorRtCacheDirectory);
-                if (!IsRamDisk(liveCacheDir))
+                if (!IsRamDiskForCache(liveCacheDir))
                 {
                     WriteLog("[Cache] TRT cache is not on a RAM disk; skip restore/backup sync.");
                     return;
@@ -432,10 +529,11 @@ namespace ZiView
                 long backupSize = new DirectoryInfo(backupDir)
                     .EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
                 long freeOnRamDisk = GetFreeBytesForPath(liveCacheDir);
+                string resolvedRoot = Path.GetPathRoot(Path.GetFullPath(liveCacheDir)) ?? "?";
                 if (freeOnRamDisk >= 0 && freeOnRamDisk < backupSize + CacheSyncMinFreeBytes)
                 {
                     WriteLog($"[Cache] RAM disk free space insufficient for restore " +
-                             $"({freeOnRamDisk / 1024 / 1024}MB free, need {(backupSize + CacheSyncMinFreeBytes) / 1024 / 1024}MB). Skipping.");
+                             $"({freeOnRamDisk / 1024 / 1024}MB free on {resolvedRoot}, need {(backupSize + CacheSyncMinFreeBytes) / 1024 / 1024}MB, path={liveCacheDir}). Skipping.");
                     return;
                 }
 
@@ -460,7 +558,7 @@ namespace ZiView
             try
             {
                 string liveCacheDir = GetTensorRtCacheDirectory(_config.TensorRtCacheDirectory);
-                if (!IsRamDisk(liveCacheDir)) return; // RAMDISK運用時のみ退避が必要
+                if (!IsRamDiskForCache(liveCacheDir)) return; // RAMDISK運用時のみ退避が必要
 
                 if (!Directory.Exists(liveCacheDir)) return;
                 var liveFiles = Directory.EnumerateFiles(liveCacheDir, "*", SearchOption.AllDirectories).ToList();
@@ -469,9 +567,11 @@ namespace ZiView
                 string backupDir = GetTrtCacheBackupDirectory();
                 long liveSize = liveFiles.Sum(f => new FileInfo(f).Length);
                 long freeOnSsd = GetFreeBytesForPath(backupDir);
+                string resolvedRoot = Path.GetPathRoot(Path.GetFullPath(backupDir)) ?? "?";
                 if (freeOnSsd >= 0 && freeOnSsd < liveSize + CacheSyncMinFreeBytes)
                 {
-                    WriteLog($"[Cache] SSD free space insufficient for backup ({freeOnSsd / 1024 / 1024}MB free). Skipping.");
+                    WriteLog($"[Cache] SSD free space insufficient for backup " +
+                             $"({freeOnSsd / 1024 / 1024}MB free on {resolvedRoot}, need {(liveSize + CacheSyncMinFreeBytes) / 1024 / 1024}MB, path={backupDir}). Skipping.");
                     return;
                 }
 
@@ -726,6 +826,7 @@ namespace ZiView
         /// </summary>
         private bool TryGetFullFrameEligible(Mat input, out string reason)
         {
+            if (!_fullFrameSupported) { reason = "disabled after earlier failure this session"; return false; }
             if (_fixedInputSize.HasValue) { reason = "fixed-shape model"; return false; }
             if (_activeEngineMode.StartsWith("CPU")) { reason = "CPU mode"; return false; }
 
@@ -766,7 +867,9 @@ namespace ZiView
                 }
                 catch (Exception exFull)
                 {
-                    WriteLog($"[AI] Full-frame inference failed ({exFull.Message}). Falling back to tiled inference.");
+                    _fullFrameSupported = false;
+                    WriteLog($"[AI] Full-frame inference failed ({exFull.Message}). " +
+                             "Disabling full-frame for this session; using tiled inference from now on.");
                 }
             }
 

@@ -274,6 +274,13 @@
                                 <TextBlock Text="未指定（自動）の場合、X:\temp\ZView\trt_cache が使えればそちらへ、使えなければプログラムルート直下\trt_cache へ出力します。変更は次回のAIエンジン初期化時（起動・モデル切替等）から反映されます。"
                                            Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
+                                <TextBlock Text="RAMDISK自動同期（PC再起動対策）" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
+                                <RadioButton x:Name="RadioRamDiskAuto" GroupName="RamDisk" Content="自動判定（ドライブ種別から推定）"/>
+                                <RadioButton x:Name="RadioRamDiskForceOn" GroupName="RamDisk" Content="常にRAMDISK扱いにする（自動判定が外れる場合）"/>
+                                <RadioButton x:Name="RadioRamDiskForceOff" GroupName="RamDisk" Content="同期を行わない"/>
+                                <TextBlock Text="RAMDISK扱いの場合、終了時にキャッシュをSSD（プログラムルート\trt_cache_backup）へ退避し、次回起動時にRAMDISK側が空ならそこから復元します。自動判定はドライバによってはFixed扱いで報告され外れることがあるため、その場合はここで強制指定してください。"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
                                 <CheckBox x:Name="TrtCacheCheckBox" Content="TensorRTエンジンキャッシュを永続化する" Margin="0,0,0,4"/>
                                 <TextBlock Text="初回のみビルドで低速、2回目以降は同一モデル・同一環境なら高速起動になります。"
                                            Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>

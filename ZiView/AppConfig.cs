@@ -68,6 +68,12 @@ namespace ZiView
         // X:\temp\ZView\trt_cache が使えれば優先、無ければプログラムルート直下\trt_cache）
         public string TensorRtCacheDirectory { get; set; } = "";
 
+        // TensorRTキャッシュ出力先がRAMDISKかどうかの判定方法。
+        // "Auto"：DriveInfo.DriveTypeによる自動判定（一部のRAMDISKドライバではFixed扱いになり誤判定されうる）
+        // "ForceOn"：常にRAMDISK扱い（PC再起動時にSSDから自動復元／終了時にSSDへ自動退避する）
+        // "ForceOff"：常に非RAMDISK扱い（復元・退避を一切行わない）
+        public string TrtCacheRamDiskOverride { get; set; } = "Auto";
+
         // TensorRTのエンジンキャッシュ(ビルド済み最適化エンジン)をディスクへ永続化するか。
         // ONにすると初回のみ低速（エンジンビルド）、2回目以降は大幅に高速化される。
         // ディスク容量が気になる場合はOFFにするか、SettingsWindowからキャッシュを削除できる。
