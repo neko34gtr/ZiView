@@ -3,8 +3,11 @@
     <BuildType Name="Debug" />
     <BuildType Name="Intel_R" />
     <BuildType Name="Release" />
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
   </Configurations>
   <Project Path="ZiView/ZiView.csproj">
     <BuildType Solution="Intel_R|*" Project="Release" />
+    <Platform Solution="*|x64" Project="x64" />
   </Project>
 </Solution>
