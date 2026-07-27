@@ -26,12 +26,12 @@
 	</ItemGroup>
 
 	<!-- NVIDIA環境用 (Debug / Release などの標準ビルド時) -->
-	<ItemGroup Condition="'$(Configuration)' != 'Intel_Rel'">
+	<ItemGroup Condition="'$(Configuration)' != 'Intel_R'">
 		<PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.26.0" />
 	</ItemGroup>
 
 	<!-- Intel環境用 (Intel_Release ビルド時) -->
-	<ItemGroup Condition="'$(Configuration)' == 'Intel_Rel'">
+	<ItemGroup Condition="'$(Configuration)' == 'Intel_R'">
 		<PackageReference Include="Intel.ML.OnnxRuntime.OpenVino" Version="1.24.1" />
 	</ItemGroup>
 
