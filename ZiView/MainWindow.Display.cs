@@ -685,6 +685,10 @@ namespace ZiView
             ImgScale.ScaleY = 1.0;
             ImgTranslate.X = 0;
             ImgTranslate.Y = 0;
+
+            // 表示回転（Rキー）は別ソース読込時にリセットする（設定として永続化はしていない）
+            _rotationAngle = 0;
+            if (_imgRotate != null) _imgRotate.Angle = 0;
         }
     }
 }

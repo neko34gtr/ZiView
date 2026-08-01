@@ -57,6 +57,10 @@ namespace ZiView
         private System.Windows.Point _origin;
         private bool _isDragging;
 
+        // 表示回転（Rキー）: 設定として永続化はせず、アプリ再起動または別ソース読込でリセットされる
+        private System.Windows.Media.RotateTransform? _imgRotate;
+        private int _rotationAngle = 0; // 0-3（90度単位）
+
         private void InitGpuMonitor()
         {
             if (_isGpuCheckAttempted) return;
@@ -184,7 +188,7 @@ namespace ZiView
                         e.Handled = true;
                     }
                     break;
-                case Key.R:
+                case Key.L:
                     _config.ShowReticle = !_config.ShowReticle;
                     ApplyConfigToUi();
                     ShowNotification(_config.ShowReticle ? "レティクル: ON" : "レティクル: OFF");
@@ -194,6 +198,10 @@ namespace ZiView
                     _config.EnableLensCorrection = !_config.EnableLensCorrection;
                     ApplyConfigToUi();
                     ShowNotification(_config.EnableLensCorrection ? $"逆湾曲補正: ON (強度: {_config.LensCorrectionAmount:F2})" : "逆湾曲補正: OFF");
+                    e.Handled = true;
+                    break;
+                case Key.R:
+                    RotateView();
                     e.Handled = true;
                     break;
                 case Key.OemOpenBrackets:
@@ -351,6 +359,53 @@ namespace ZiView
             ImgScale.ScaleY = newScale;
         }
 
+        /// <summary>
+        /// MainImage.RenderTransformへ回転専用のRotateTransformを1度だけ組み込む。
+        /// 既存のImgScale/ImgTranslate（ズーム・パン用）より先に適用されるよう先頭へ挿入することで、
+        /// 画像自身の中心を軸にした回転→既存のズーム・パンの順で合成される。
+        /// </summary>
+        private void EnsureRotateTransform()
+        {
+            if (_imgRotate != null) return;
+            _imgRotate = new System.Windows.Media.RotateTransform(0);
+
+            if (MainImage.RenderTransform is System.Windows.Media.TransformGroup group)
+            {
+                group.Children.Insert(0, _imgRotate);
+            }
+            else
+            {
+                var newGroup = new System.Windows.Media.TransformGroup();
+                newGroup.Children.Add(_imgRotate);
+                if (MainImage.RenderTransform != null)
+                    newGroup.Children.Add(MainImage.RenderTransform);
+                MainImage.RenderTransform = newGroup;
+            }
+        }
+
+        /// <summary>
+        /// Rキー/コンテキストメニューから呼ばれる表示回転。押すたびに右90度ずつ進み、4回で元に戻る。
+        /// 見開き表示中に呼ばれた場合は見開きをOFFにしてから回転する（基準は右側＝現在のPageSlider.Valueのページ）。
+        /// 見開きOFF自体はOnSettingChanged経由でConfig非保存のまま反映されるため、再起動すれば見開き設定は元に戻る。
+        /// 回転自体も設定として永続化しない（アプリ再起動でリセット、別ソース読込でもResetTransformによりリセットされる）。
+        /// </summary>
+        private void RotateView()
+        {
+            if (CheckSpread.IsChecked == true)
+            {
+                CheckSpread.IsChecked = false;
+            }
+
+            EnsureRotateTransform();
+            _rotationAngle = (_rotationAngle + 1) % 4;
+
+            _imgRotate!.CenterX = MainImage.ActualWidth / 2;
+            _imgRotate.CenterY = MainImage.ActualHeight / 2;
+            _imgRotate.Angle = _rotationAngle * 90;
+
+            ShowNotification($"回転: {_rotationAngle * 90}°");
+        }
+
         private void ShowContextMenu()
         {
             var menu = new System.Windows.Controls.ContextMenu();
@@ -358,6 +413,10 @@ namespace ZiView
             var itemFullscreen = new System.Windows.Controls.MenuItem { Header = "全画面表示の切り替え" };
             itemFullscreen.Click += (s, ev) => ToggleFullscreen();
             menu.Items.Add(itemFullscreen);
+
+            var itemRotate = new System.Windows.Controls.MenuItem { Header = "表示を90度回転 (R)" };
+            itemRotate.Click += (s, ev) => RotateView();
+            menu.Items.Add(itemRotate);
 
             menu.Items.Add(new System.Windows.Controls.Separator());
 
