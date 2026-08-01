@@ -1,0 +1,36 @@
+﻿<UserControl x:Class="ZiView.ToneCurveOverlay"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             Width="240" Height="270" Focusable="False">
+    <Border Background="Black" BorderBrush="Gold" BorderThickness="2" CornerRadius="3">
+        <Grid Margin="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0"
+                       Text="TONE CURVE"
+                       Foreground="White"
+                       FontWeight="Bold"
+                       FontSize="13"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,8"/>
+
+            <!-- グリッド・カーブ・制御点はすべてコードビハインドで描画する（マウス操作のたびに再描画するため） -->
+            <Canvas x:Name="CurveCanvas"
+                    Grid.Row="1"
+                    Width="200"
+                    Height="200"
+                    Background="Transparent"
+                    ClipToBounds="True"
+                    MouseLeftButtonDown="CurveCanvas_MouseLeftButtonDown"
+                    MouseRightButtonDown="CurveCanvas_MouseRightButtonDown"
+                    MouseMove="CurveCanvas_MouseMove"
+                    MouseLeftButtonUp="CurveCanvas_MouseLeftButtonUp"/>
+        </Grid>
+    </Border>
+</UserControl>

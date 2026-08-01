@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -25,9 +26,16 @@ namespace ZiView
         private Mat? _currentCombinedUpscaled;
         private readonly string _tempExtractDir = Path.Combine(Path.GetTempPath(), "ZiView_Temp");
 
+        // 現在表示中ページの見開き境界情報（片側ページ位置微調整機能・Input.cs側が使用）。
+        // LeftWidth<=0は非見開き（または左ページ無し）を意味する。LeftKey/RightKeyはそれぞれの
+        // ページの_imageList上のキー（＝将来SQLiteへ保存する際のファイル単位オフセットのキーにもなる）。
+        private int _currentSpreadLeftWidth = 0;
+        private string? _currentSpreadLeftKey;
+        private string? _currentSpreadRightKey;
+
         // AI先読み（プリフェッチ）用: 事前デコード・事前AI推論済みのページを一時保持するキャッシュ。
         // キー=ページインデックス。現在ページの表示完了直後に「次ページ」のみを1件先読みする軽量実装。
-        private readonly Dictionary<int, (Mat Original, Mat? Upscaled, bool IsSpread)> _pageCache = new();
+        private readonly Dictionary<int, (Mat Original, Mat? Upscaled, bool IsSpread, int LeftWidth)> _pageCache = new();
         private CancellationTokenSource? _prefetchCts;
         private Task? _prefetchTask;
 
@@ -207,6 +215,10 @@ namespace ZiView
                     _currentCombinedUpscaled = cached.Upscaled;
                     isSpread = cached.IsSpread;
 
+                    _currentSpreadLeftWidth = isSpread ? cached.LeftWidth : 0;
+                    _currentSpreadRightKey = _imageList[index];
+                    _currentSpreadLeftKey = (isSpread && index + 1 < _imageList.Count) ? _imageList[index + 1] : null;
+
                     PageText.Text = isSpread ? $"P.{index + 2}-{index + 1} / {_imageList.Count}" : $"P.{index + 1} / {_imageList.Count}";
                     if ((int)PageSlider.Value != index)
                     {
@@ -228,11 +240,15 @@ namespace ZiView
                     bool autoDetectEnabled = CheckAutoDetect.IsChecked == true;
 
                     // 画像デコード（ファイルI/O・展開）はUIスレッドをブロックしないようバックグラウンドで実行する
-                    var (combined, spread) = await Task.Run(() => DecodeCombinedPage(index, spreadEnabled, autoDetectEnabled), token);
+                    var (combined, spread, leftWidth) = await Task.Run(() => DecodeCombinedPage(index, spreadEnabled, autoDetectEnabled), token);
                     if (token.IsCancellationRequested) { combined.Dispose(); return; }
 
                     _currentCombinedOriginal = combined;
                     isSpread = spread;
+
+                    _currentSpreadLeftWidth = isSpread ? leftWidth : 0;
+                    _currentSpreadRightKey = _imageList[index];
+                    _currentSpreadLeftKey = (isSpread && index + 1 < _imageList.Count) ? _imageList[index + 1] : null;
 
                     PageText.Text = isSpread ? $"P.{index + 2}-{index + 1} / {_imageList.Count}" : $"P.{index + 1} / {_imageList.Count}";
 
@@ -343,16 +359,20 @@ namespace ZiView
         /// 指定ページの画像をデコードし（必要なら見開き合成した上で）返す。
         /// ファイルI/Oやアーカイブ展開を伴うため、呼び出し側はTask.Run等でUIスレッド外から呼ぶこと。
         /// spreadEnabled/autoDetectEnabledはUI要素へアクセスせずに済むよう、呼び出し元でUIスレッド上から読み取って渡す。
+        /// LeftWidthは見開き合成時の左ページの幅（＝合成画像内での左右の境界X座標）。非見開き時は0。
+        /// 見開き時の片側ページ位置微調整機能（Input.cs側）が、合成後のビットマップ上でどこからどこまでが
+        /// 左ページ/右ページかを判定するために使う。
         /// </summary>
-        private (Mat Combined, bool IsSpread) DecodeCombinedPage(int index, bool spreadEnabled, bool autoDetectEnabled)
+        private (Mat Combined, bool IsSpread, int LeftWidth) DecodeCombinedPage(int index, bool spreadEnabled, bool autoDetectEnabled)
         {
             Mat pRight = LoadMat(_imageList[index]);
             bool isAutoSingle = (autoDetectEnabled && pRight.Height > 0 && (double)pRight.Width / pRight.Height > 1.1);
             bool isSpread = (spreadEnabled && !isAutoSingle);
 
             Mat? pLeft = (isSpread && index + 1 < _imageList.Count) ? LoadMat(_imageList[index + 1]) : null;
+            int leftWidth = pLeft?.Width ?? 0;
             Mat combined = CombineMats(pRight, pLeft);
-            return (combined, isSpread);
+            return (combined, isSpread, leftWidth);
         }
 
         /// <summary>
@@ -391,7 +411,7 @@ namespace ZiView
             Mat? upscaled = null;
             try
             {
-                var (decoded, isSpread) = await Task.Run(() => DecodeCombinedPage(index, spreadEnabled, autoDetectEnabled), token);
+                var (decoded, isSpread, leftWidth) = await Task.Run(() => DecodeCombinedPage(index, spreadEnabled, autoDetectEnabled), token);
                 combined = decoded;
                 token.ThrowIfCancellationRequested();
 
@@ -409,7 +429,7 @@ namespace ZiView
                     return;
                 }
 
-                _pageCache[index] = (combined, upscaled, isSpread);
+                _pageCache[index] = (combined, upscaled, isSpread, leftWidth);
                 WriteLog($"[Prefetch] Page {index + 1} ready in background.");
             }
             catch (OperationCanceledException)
@@ -610,17 +630,40 @@ namespace ZiView
             AiProgressOsd.Visibility = Visibility.Collapsed;
         }
 
+        /// <summary>
+        /// トーンカーブ(Tキー)のLUTが設定されている場合、表示直前のMatへLUTを適用した新規Matを返す。
+        /// srcそのものは一切変更しない（_currentCombinedOriginal/_currentCombinedUpscaled等の
+        /// キャッシュ済みMatを汚さないため、必ず新規Matとして返す）。未設定時はsrcをそのまま返し、無駄なコピーを避ける。
+        /// </summary>
+        private Mat ApplyToneCurveForDisplay(Mat src)
+        {
+            if (_toneCurveLut == null) return src;
+
+            using var lutMat = new Mat(1, 256, MatType.CV_8UC1);
+            Marshal.Copy(_toneCurveLut, 0, lutMat.Data, 256);
+
+            var dst = new Mat();
+            Cv2.LUT(src, lutMat, dst);
+            return dst;
+        }
+
         private void UpdateImageDisplay()
         {
             if (_currentCombinedOriginal == null) return;
             if (_currentCombinedUpscaled == null)
             {
-                MainImage.Source = _currentCombinedOriginal.ToWriteableBitmap();
+                var toned = ApplyToneCurveForDisplay(_currentCombinedOriginal);
+                MainImage.Source = toned.ToWriteableBitmap();
+                if (toned != _currentCombinedOriginal) toned.Dispose();
+                RefreshPageOffsetOverlays();
                 return;
             }
             if (SplitSlider.Value >= 100)
             {
-                MainImage.Source = _currentCombinedUpscaled.ToWriteableBitmap();
+                var toned = ApplyToneCurveForDisplay(_currentCombinedUpscaled);
+                MainImage.Source = toned.ToWriteableBitmap();
+                if (toned != _currentCombinedUpscaled) toned.Dispose();
+                RefreshPageOffsetOverlays();
                 return;
             }
 
@@ -645,8 +688,11 @@ namespace ZiView
                 Cv2.Rectangle(disp, new OpenCvSharp.Rect(sx - 25, 0, 50, h), new Scalar(0, 0, 255), -1);
             }
 
-            MainImage.Source = disp.ToWriteableBitmap();
+            var finalDisp = ApplyToneCurveForDisplay(disp);
+            MainImage.Source = finalDisp.ToWriteableBitmap();
+            if (finalDisp != disp) finalDisp.Dispose();
             disp.Dispose();
+            RefreshPageOffsetOverlays();
         }
 
         private void MovePage(int dir)
