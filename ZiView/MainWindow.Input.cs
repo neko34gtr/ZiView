@@ -93,6 +93,7 @@ namespace ZiView
         private readonly Dictionary<string, System.Windows.Point> _pageOffsets = new();
 
         private System.Windows.Controls.Canvas? _pageOffsetOverlayCanvas;
+        private System.Windows.Shapes.Rectangle? _pageOffsetSelectionBorder;
 
         private sealed class PageOffsetOverlayUnit
         {
@@ -105,7 +106,7 @@ namespace ZiView
         private bool _isPageOffsetDragging = false;
         private bool _pageOffsetDragIsLeft;
         private string? _pageOffsetDragKey;
-        private Rect _pageOffsetDragRect;
+        private Rect _pageOffsetDragLocalRect;
         private double _pageOffsetDragFitScale;
         private System.Windows.Point _pageOffsetDragStartMouseLocal;
         private System.Windows.Point _pageOffsetDragStartOffset;
@@ -188,6 +189,7 @@ namespace ZiView
             System.Windows.Point currentPoint = e.GetPosition(RootGrid);
             ImgTranslate.X = _origin.X + (currentPoint.X - _startPoint.X);
             ImgTranslate.Y = _origin.Y + (currentPoint.Y - _startPoint.Y);
+            RefreshPageOffsetOverlays(); // パンでMainImageの画面位置が変わるため、永続オフセットオーバーレイも追従させる
         }
 
         private void ImageContainer_MouseWheel(object sender, MouseWheelEventArgs e)
@@ -228,6 +230,7 @@ namespace ZiView
 
                 ImgTranslate.X -= (mousePos.X - ImageBorder.ActualWidth / 2) * (zoomFactor - 1) * ImgScale.ScaleX;
                 ImgTranslate.Y -= (mousePos.Y - ImageBorder.ActualHeight / 2) * (zoomFactor - 1) * ImgScale.ScaleY;
+                RefreshPageOffsetOverlays(); // ズームでMainImageの画面上の大きさ・位置が変わるため追従させる
             }
         }
         #endregion
@@ -474,6 +477,7 @@ namespace ZiView
 
             ImgScale.ScaleX = newScale;
             ImgScale.ScaleY = newScale;
+            RefreshPageOffsetOverlays();
         }
 
         /// <summary>
@@ -507,6 +511,7 @@ namespace ZiView
             EnsureRotateTransform();
             _rotationAngle = (_rotationAngle + 1) % 4;
             _imgRotate!.Angle = _rotationAngle * 90;
+            RefreshPageOffsetOverlays();
 
             ShowNotification($"回転: {_rotationAngle * 90}°");
         }
@@ -724,6 +729,19 @@ namespace ZiView
         }
 
         /// <summary>
+        /// _currentSpreadLeftWidth（DecodeCombinedPage時点＝AI超解像適用前の原寸での左ページ幅）を、
+        /// 現在実際に表示されているビットマップ（AI超解像後の場合は拡大された解像度）のピクセル空間へ
+        /// 換算する。原寸合計幅に対する現在のbmp幅の比率でスケールするだけなので、AI超解像の有無・倍率に
+        /// 関わらず常に正しい境界位置になる。
+        /// </summary>
+        private double GetEffectiveSpreadLeftWidth(System.Windows.Media.Imaging.BitmapSource bmp)
+        {
+            double originalTotalWidth = _currentCombinedOriginal?.Width ?? 0;
+            double scaleRatio = originalTotalWidth > 0 ? (bmp.PixelWidth / originalTotalWidth) : 1.0;
+            return _currentSpreadLeftWidth * scaleRatio;
+        }
+
+        /// <summary>
         /// 現在表示中のビットマップ上で、見開きの左ページ/右ページそれぞれが実際に描画されている
         /// 矩形（MainImageのローカル座標系＝回転・ズームが解決済みの自然な向きの座標）を求める。
         /// ルーペ機能と同じくMainImage自身のStretch=Uniformレターボックスを自前計算するだけなので、
@@ -746,16 +764,36 @@ namespace ZiView
             double dispW = srcW * fitScale, dispH = srcH * fitScale;
             double offX = (boxW - dispW) / 2.0, offY = (boxH - dispH) / 2.0;
 
-            double splitScreenX = offX + _currentSpreadLeftWidth * fitScale;
+            double effectiveLeftWidth = GetEffectiveSpreadLeftWidth(bmp);
+            double splitScreenX = offX + effectiveLeftWidth * fitScale;
             leftRect = new Rect(offX, offY, splitScreenX - offX, dispH);
             rightRect = new Rect(splitScreenX, offY, offX + dispW - splitScreenX, dispH);
             return true;
         }
 
         /// <summary>
+        /// MainImageローカル座標系の矩形を、RootGrid座標系（＝オーバーレイCanvasの配置座標系）へ変換する。
+        /// MainImage.TransformToVisualはWPFが実際のレイアウト・LayoutTransform（回転）・RenderTransform
+        /// （ズーム/パン）をすべて考慮して計算するため、親要素の構造やMarginを自前で推測する必要がなく、
+        /// 常に画面上の実際の位置と一致する（回転90/270度で矩形が90度傾いても、角を変換してから
+        /// min/maxを取り直すことで軸並行な矩形として扱える）。
+        /// </summary>
+        private Rect LocalRectToScreen(Rect local)
+        {
+            var transform = MainImage.TransformToVisual(RootGrid);
+            var p1 = transform.Transform(new System.Windows.Point(local.Left, local.Top));
+            var p2 = transform.Transform(new System.Windows.Point(local.Right, local.Bottom));
+
+            double x1 = Math.Min(p1.X, p2.X), x2 = Math.Max(p1.X, p2.X);
+            double y1 = Math.Min(p1.Y, p2.Y), y2 = Math.Max(p1.Y, p2.Y);
+            return new Rect(x1, y1, Math.Max(0, x2 - x1), Math.Max(0, y2 - y1));
+        }
+
+        /// <summary>
         /// Shift+左クリックの押下時に呼ばれる。クリック位置が見開きの左右どちらのページ上かを判定し、
         /// 該当すればそのページの位置微調整ドラッグを開始する。対象外（非見開き・境界外クリック等）ならfalseを返し、
         /// 呼び出し側（ImageContainer_MouseLeftButtonDown）は通常の全体パンへフォールバックする。
+        /// ドラッグ開始と同時に、選択された側を色付き枠で囲って操作対象が視覚的に分かるようにする。
         /// </summary>
         private bool TryBeginPageOffsetDrag(MouseButtonEventArgs e)
         {
@@ -775,12 +813,13 @@ namespace ZiView
             _isPageOffsetDragging = true;
             _pageOffsetDragIsLeft = isLeft;
             _pageOffsetDragKey = key;
-            _pageOffsetDragRect = rect;
+            _pageOffsetDragLocalRect = rect;
             _pageOffsetDragFitScale = fitScale;
             _pageOffsetDragStartMouseLocal = posLocal;
             _pageOffsetDragStartOffset = _pageOffsets.TryGetValue(key, out var existing) ? existing : new System.Windows.Point(0, 0);
             _pageOffsetDragLiveOffset = _pageOffsetDragStartOffset;
 
+            ShowPageOffsetSelectionBorder(rect);
             SetupPageOffsetUnit(isLeft, rect, fitScale, _pageOffsetDragStartOffset);
             ImageContainer.CaptureMouse();
             e.Handled = true;
@@ -804,13 +843,13 @@ namespace ZiView
                 _pageOffsetDragStartOffset.X + dxLocal / _pageOffsetDragFitScale,
                 _pageOffsetDragStartOffset.Y + dyLocal / _pageOffsetDragFitScale);
 
-            MovePageOffsetUnit(_pageOffsetDragIsLeft, _pageOffsetDragRect, _pageOffsetDragFitScale, _pageOffsetDragLiveOffset);
+            MovePageOffsetUnit(_pageOffsetDragIsLeft, _pageOffsetDragLocalRect, _pageOffsetDragFitScale, _pageOffsetDragLiveOffset);
         }
 
         /// <summary>
         /// ドラッグ終了（MouseUp）時に呼ばれる。直近のライブオフセットを確定値として_pageOffsetsへ反映する。
         /// ほぼ0（0.5px未満）まで戻された場合は「調整なし」とみなしDictionaryから削除し、
-        /// 対応するオーバーレイも取り除いて既定表示（MainImageそのまま）へ戻す。
+        /// 対応するオーバーレイも取り除いて既定表示（MainImageそのまま）へ戻す。選択枠も非表示にする。
         /// </summary>
         private void EndPageOffsetDrag()
         {
@@ -834,14 +873,15 @@ namespace ZiView
             _isPageOffsetDragging = false;
             _pageOffsetDragKey = null;
 
+            HidePageOffsetSelectionBorder();
             RefreshPageOffsetOverlays();
         }
 
         /// <summary>
-        /// ページ切り替え・AI処理完了・トーンカーブ変更など、表示が更新されるたびにUpdateImageDisplayから
+        /// ページ切り替え・AI処理完了・トーンカーブ変更・ズーム/パン・回転など、表示に影響する操作のたびに
         /// 呼ばれる。現在表示中ページ（左右）それぞれについて、保存済みオフセットがあればオーバーレイを
         /// 表示・更新し、なければ（＝調整なし、または非見開きへ切り替わった等）オーバーレイを取り除く。
-        /// ドラッグ中に呼ばれても安全（何もしない）。
+        /// ドラッグ中に呼ばれても安全（何もしない＝ライブ更新はUpdatePageOffsetDragが別途担当）。
         /// </summary>
         private void RefreshPageOffsetOverlays()
         {
@@ -871,44 +911,61 @@ namespace ZiView
         }
 
         /// <summary>
-        /// ページ位置微調整用のオーバーレイCanvasを1度だけ生成し、MainImageの実際の親パネルへ
-        /// 兄弟要素として追加する。LayoutTransform/RenderTransformはMainImageと同一のオブジェクト参照を
-        /// 共有させることで、回転・ズーム・パンに常に自動追従させる（個別に同期コードを書く必要がない）。
+        /// ページ位置微調整用のオーバーレイCanvasを1度だけ生成する。RootGrid直下に全面スパンで固定配置し
+        /// （ルーペ/トーンカーブと同じ実績のあるパターン）、中の要素はすべて画面座標（RootGrid座標系）で
+        /// 絶対配置する。以前はMainImageの親を推測してMarginを複製する方式だったが、実際のレイアウト構造と
+        /// 一致せず移動が画面に反映されない不具合があったため、LocalRectToScreen（TransformToVisual）による
+        /// 確実な座標変換方式へ切り替えた。
         /// </summary>
         private void EnsurePageOffsetOverlayCanvas()
         {
             if (_pageOffsetOverlayCanvas != null) return;
 
-            EnsureRotateTransform(); // MainImage.LayoutTransformが必ず有効なRotateTransformである状態にしてから共有する
-
             _pageOffsetOverlayCanvas = new System.Windows.Controls.Canvas
             {
-                IsHitTestVisible = false,
-                ClipToBounds = true,
-                LayoutTransform = MainImage.LayoutTransform,
-                RenderTransform = MainImage.RenderTransform
+                IsHitTestVisible = false
             };
-
-            if (MainImage.Parent is System.Windows.Controls.Panel parentPanel)
-            {
-                parentPanel.Children.Add(_pageOffsetOverlayCanvas);
-            }
+            System.Windows.Controls.Grid.SetRowSpan(_pageOffsetOverlayCanvas, Math.Max(1, RootGrid.RowDefinitions.Count));
+            System.Windows.Controls.Grid.SetColumnSpan(_pageOffsetOverlayCanvas, Math.Max(1, RootGrid.ColumnDefinitions.Count));
             System.Windows.Controls.Panel.SetZIndex(_pageOffsetOverlayCanvas, 50); // MainImageのすぐ上、他のオーバーレイ(トーンカーブ/ルーペ)よりは下
+            RootGrid.Children.Add(_pageOffsetOverlayCanvas);
         }
 
         /// <summary>
-        /// オーバーレイCanvas自体の箱（サイズ・配置）をMainImageの現在値へ同期する。
-        /// ウィンドウサイズ変化などでMainImageの実際のレイアウト矩形が変わっている可能性があるため、
-        /// コンテンツを配置する直前に毎回呼び出す。
+        /// Shift+ドラッグ中、選択されている側のページ範囲を色付きの枠線で囲って表示する。
+        /// ドラッグ中は元の位置（範囲）に固定表示し、「今どのページを操作しているか」を示す。
         /// </summary>
-        private void SyncPageOffsetOverlayCanvasBox()
+        private void ShowPageOffsetSelectionBorder(Rect localRect)
         {
-            if (_pageOffsetOverlayCanvas == null) return;
-            _pageOffsetOverlayCanvas.HorizontalAlignment = MainImage.HorizontalAlignment;
-            _pageOffsetOverlayCanvas.VerticalAlignment = MainImage.VerticalAlignment;
-            _pageOffsetOverlayCanvas.Margin = MainImage.Margin;
-            _pageOffsetOverlayCanvas.Width = MainImage.ActualWidth;
-            _pageOffsetOverlayCanvas.Height = MainImage.ActualHeight;
+            EnsurePageOffsetOverlayCanvas();
+
+            _pageOffsetSelectionBorder ??= new System.Windows.Shapes.Rectangle
+            {
+                Stroke = System.Windows.Media.Brushes.Cyan,
+                StrokeThickness = 3,
+                Fill = System.Windows.Media.Brushes.Transparent,
+                IsHitTestVisible = false
+            };
+            if (_pageOffsetSelectionBorder.Parent == null)
+            {
+                _pageOffsetOverlayCanvas!.Children.Add(_pageOffsetSelectionBorder);
+            }
+            System.Windows.Controls.Panel.SetZIndex(_pageOffsetSelectionBorder, 60); // マスク/切り出し画像より上
+
+            var screen = LocalRectToScreen(localRect);
+            _pageOffsetSelectionBorder.Width = screen.Width;
+            _pageOffsetSelectionBorder.Height = screen.Height;
+            System.Windows.Controls.Canvas.SetLeft(_pageOffsetSelectionBorder, screen.X);
+            System.Windows.Controls.Canvas.SetTop(_pageOffsetSelectionBorder, screen.Y);
+            _pageOffsetSelectionBorder.Visibility = Visibility.Visible;
+        }
+
+        private void HidePageOffsetSelectionBorder()
+        {
+            if (_pageOffsetSelectionBorder != null)
+            {
+                _pageOffsetSelectionBorder.Visibility = Visibility.Collapsed;
+            }
         }
 
         private PageOffsetOverlayUnit CreatePageOffsetUnit()
@@ -930,18 +987,19 @@ namespace ZiView
 
         /// <summary>
         /// 指定サイドのオーバーレイ（マスク＋切り出し画像）を用意し、指定オフセットの位置へ配置する。
-        /// マスクは常に元の位置に固定してMainImage側の該当範囲を覆い隠し（ズレたゴーストが見えないようにする）、
-        /// 切り出し画像は「元の位置＋オフセット」へ配置する。呼び出しのたびにCroppedBitmapを取り直すため、
+        /// マスクは常に元の位置（ローカル矩形をそのまま画面座標へ変換した位置）に固定してMainImage側の
+        /// 該当範囲を覆い隠し（ズレたゴーストが見えないようにする）、切り出し画像は「元の位置＋オフセット」を
+        /// ローカル座標で計算してから画面座標へ変換して配置する。呼び出しのたびにCroppedBitmapを取り直すため、
         /// トーンカーブ変更やAI処理完了などでMainImage.Sourceが更新された場合も内容が正しく追従する。
+        /// 回転中は、切り出しビットマップ自体も画面表示と同じ角度だけ回転させる（ルーペ機能と同じ対応）。
         /// ドラッグ開始時・ページ再表示時など「内容が変わりうるタイミング」で使うやや重い版。
         /// </summary>
-        private void SetupPageOffsetUnit(bool isLeft, Rect rect, double fitScale, System.Windows.Point offsetPixels)
+        private void SetupPageOffsetUnit(bool isLeft, Rect localRect, double fitScale, System.Windows.Point offsetPixels)
         {
-            if (rect.Width <= 0 || rect.Height <= 0) return;
+            if (localRect.Width <= 0 || localRect.Height <= 0) return;
             if (MainImage.Source is not System.Windows.Media.Imaging.BitmapSource bmp) return;
 
             EnsurePageOffsetOverlayCanvas();
-            SyncPageOffsetOverlayCanvasBox();
 
             var unit = isLeft
                 ? (_leftOffsetUnit ??= CreatePageOffsetUnit())
@@ -950,35 +1008,55 @@ namespace ZiView
             if (unit.Mask.Parent == null) _pageOffsetOverlayCanvas!.Children.Add(unit.Mask);
             if (unit.CropImage.Parent == null) _pageOffsetOverlayCanvas!.Children.Add(unit.CropImage);
 
-            unit.Mask.Width = rect.Width;
-            unit.Mask.Height = rect.Height;
-            System.Windows.Controls.Canvas.SetLeft(unit.Mask, rect.X);
-            System.Windows.Controls.Canvas.SetTop(unit.Mask, rect.Y);
+            var maskScreen = LocalRectToScreen(localRect);
+            unit.Mask.Width = maskScreen.Width;
+            unit.Mask.Height = maskScreen.Height;
+            System.Windows.Controls.Canvas.SetLeft(unit.Mask, maskScreen.X);
+            System.Windows.Controls.Canvas.SetTop(unit.Mask, maskScreen.Y);
 
-            int cropX = isLeft ? 0 : _currentSpreadLeftWidth;
-            int cropW = isLeft ? _currentSpreadLeftWidth : Math.Max(0, bmp.PixelWidth - _currentSpreadLeftWidth);
+            int effectiveLeftWidthPx = (int)Math.Round(GetEffectiveSpreadLeftWidth(bmp));
+            int cropX = isLeft ? 0 : effectiveLeftWidthPx;
+            int cropW = isLeft ? effectiveLeftWidthPx : Math.Max(0, bmp.PixelWidth - effectiveLeftWidthPx);
             int cropH = bmp.PixelHeight;
             if (cropW <= 0 || cropH <= 0) return;
 
-            unit.CropImage.Source = new System.Windows.Media.Imaging.CroppedBitmap(bmp, new Int32Rect(cropX, 0, cropW, cropH));
-            unit.CropImage.Width = rect.Width;
-            unit.CropImage.Height = rect.Height;
+            var cropped = new System.Windows.Media.Imaging.CroppedBitmap(bmp, new Int32Rect(cropX, 0, cropW, cropH));
+            unit.CropImage.Source = _rotationAngle == 0
+                ? cropped
+                : new System.Windows.Media.Imaging.TransformedBitmap(
+                    cropped, new System.Windows.Media.RotateTransform(_rotationAngle * 90));
 
-            System.Windows.Controls.Canvas.SetLeft(unit.CropImage, rect.X + offsetPixels.X * fitScale);
-            System.Windows.Controls.Canvas.SetTop(unit.CropImage, rect.Y + offsetPixels.Y * fitScale);
+            var offsetLocalRect = new Rect(
+                localRect.X + offsetPixels.X * fitScale,
+                localRect.Y + offsetPixels.Y * fitScale,
+                localRect.Width, localRect.Height);
+            var cropScreen = LocalRectToScreen(offsetLocalRect);
+
+            unit.CropImage.Width = cropScreen.Width;
+            unit.CropImage.Height = cropScreen.Height;
+            System.Windows.Controls.Canvas.SetLeft(unit.CropImage, cropScreen.X);
+            System.Windows.Controls.Canvas.SetTop(unit.CropImage, cropScreen.Y);
         }
 
         /// <summary>
         /// 既にSetupPageOffsetUnitで内容（CroppedBitmap）が設定済みの前提で、位置のみを更新する軽量版。
         /// ドラッグ中のMouseMoveのたびに呼ばれるため、画像処理を一切行わずCanvas.Left/Topの更新のみに留める。
         /// </summary>
-        private void MovePageOffsetUnit(bool isLeft, Rect rect, double fitScale, System.Windows.Point offsetPixels)
+        private void MovePageOffsetUnit(bool isLeft, Rect localRect, double fitScale, System.Windows.Point offsetPixels)
         {
             var unit = isLeft ? _leftOffsetUnit : _rightOffsetUnit;
             if (unit == null) return;
 
-            System.Windows.Controls.Canvas.SetLeft(unit.CropImage, rect.X + offsetPixels.X * fitScale);
-            System.Windows.Controls.Canvas.SetTop(unit.CropImage, rect.Y + offsetPixels.Y * fitScale);
+            var offsetLocalRect = new Rect(
+                localRect.X + offsetPixels.X * fitScale,
+                localRect.Y + offsetPixels.Y * fitScale,
+                localRect.Width, localRect.Height);
+            var cropScreen = LocalRectToScreen(offsetLocalRect);
+
+            unit.CropImage.Width = cropScreen.Width;
+            unit.CropImage.Height = cropScreen.Height;
+            System.Windows.Controls.Canvas.SetLeft(unit.CropImage, cropScreen.X);
+            System.Windows.Controls.Canvas.SetTop(unit.CropImage, cropScreen.Y);
         }
 
         /// <summary>
