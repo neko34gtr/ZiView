@@ -4,7 +4,6 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -15,8 +14,11 @@ using OpenCvSharp.WpfExtensions;
 namespace ZiView
 {
     /// <summary>
-    /// MainWindow partial: 画像/アーカイブソースの読み込み、ページ送り、
-    /// 見開き合成、AI比較表示（分割スライダー）を担当する。
+    /// MainWindow partial（コア）: 画像/アーカイブソースの読み込み、ページ送り、
+    /// 見開き合成、AI比較表示（分割スライダー）、AI進捗OSDを担当する。
+    /// トーンカーブLUTの適用（ApplyToneCurveForDisplay）はMainWindow.ToneCurve.cs、
+    /// 見開き境界の追跡（_currentSpreadLeftWidth等）と片側ページ位置微調整は
+    /// MainWindow.PageOffset.cs、回転状態のリセットはMainWindow.Rotation.csのフィールドを参照。
     /// </summary>
     public partial class MainWindow
     {
@@ -25,13 +27,6 @@ namespace ZiView
         private Mat? _currentCombinedOriginal;
         private Mat? _currentCombinedUpscaled;
         private readonly string _tempExtractDir = Path.Combine(Path.GetTempPath(), "ZiView_Temp");
-
-        // 現在表示中ページの見開き境界情報（片側ページ位置微調整機能・Input.cs側が使用）。
-        // LeftWidth<=0は非見開き（または左ページ無し）を意味する。LeftKey/RightKeyはそれぞれの
-        // ページの_imageList上のキー（＝将来SQLiteへ保存する際のファイル単位オフセットのキーにもなる）。
-        private int _currentSpreadLeftWidth = 0;
-        private string? _currentSpreadLeftKey;
-        private string? _currentSpreadRightKey;
 
         // AI先読み（プリフェッチ）用: 事前デコード・事前AI推論済みのページを一時保持するキャッシュ。
         // キー=ページインデックス。現在ページの表示完了直後に「次ページ」のみを1件先読みする軽量実装。
@@ -631,22 +626,8 @@ namespace ZiView
         }
 
         /// <summary>
-        /// トーンカーブ(Tキー)のLUTが設定されている場合、表示直前のMatへLUTを適用した新規Matを返す。
-        /// srcそのものは一切変更しない（_currentCombinedOriginal/_currentCombinedUpscaled等の
-        /// キャッシュ済みMatを汚さないため、必ず新規Matとして返す）。未設定時はsrcをそのまま返し、無駄なコピーを避ける。
+        /// トーンカーブ(Tキー)のLUT適用（ApplyToneCurveForDisplay）はMainWindow.ToneCurve.cs側で定義。
         /// </summary>
-        private Mat ApplyToneCurveForDisplay(Mat src)
-        {
-            if (_toneCurveLut == null) return src;
-
-            using var lutMat = new Mat(1, 256, MatType.CV_8UC1);
-            Marshal.Copy(_toneCurveLut, 0, lutMat.Data, 256);
-
-            var dst = new Mat();
-            Cv2.LUT(src, lutMat, dst);
-            return dst;
-        }
-
         private void UpdateImageDisplay()
         {
             if (_currentCombinedOriginal == null) return;
