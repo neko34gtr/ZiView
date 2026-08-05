@@ -342,7 +342,8 @@
                     <Border Style="{StaticResource CardPanel}">
                         <StackPanel>
                             <TextBlock Text="表示" Style="{StaticResource SectionLabel}"/>
-                            <CheckBox x:Name="CheckSpread" Content="見開き表示（右開き）" IsChecked="False" Click="OnSettingChanged"/>
+                            <!-- <CheckBox x:Name="CheckSpread" Content="見開き表示（右開き）" IsChecked="False" Click="OnSettingChanged"/> -->
+                            <local:ReadingModeSegmentedControl x:Name="ReadingModeControl" ModeChanged="ReadingModeControl_ModeChanged"/>
                             <CheckBox x:Name="CheckAutoDetect" Content="ページ順の自動判定" IsChecked="False" Click="OnSettingChanged"/>
                             <CheckBox x:Name="CheckReticle" Content="レティクル表示" IsChecked="False" Click="OnReticleSettingChanged"/>
                             <CheckBox x:Name="CheckPrefetch" Content="AI先読み" IsChecked="True" Click="OnPrefetchToggleChanged"/>

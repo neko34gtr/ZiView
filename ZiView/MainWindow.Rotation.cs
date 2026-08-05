@@ -28,15 +28,16 @@
 
         /// <summary>
         /// Rキー/コンテキストメニューから呼ばれる表示回転。押すたびに右90度ずつ進み、4回で元に戻る。
-        /// 見開き表示中に呼ばれた場合は見開きをOFFにしてから回転する（基準は右側＝現在のPageSlider.Valueのページ）。
-        /// 見開きOFF自体はOnSettingChanged経由でConfig非保存のまま反映されるため、再起動すれば見開き設定は元に戻る。
-        /// 回転自体も設定として永続化しない（アプリ再起動でリセット、別ソース読込でもResetTransformによりリセットされる）。
+        /// 見開き表示中（L2/R2）に呼ばれた場合は単ページ(S1)へ切り替えてから回転する
+        /// （基準は現在のPageSlider.Valueのページ）。開き方向の切替自体はセッション内一時状態のため、
+        /// 再起動すれば元の設定に戻る。回転自体も設定として永続化しない（アプリ再起動でリセット、
+        /// 別ソース読込でもResetTransformによりリセットされる）。
         /// </summary>
         private void RotateView()
         {
-            if (CheckSpread.IsChecked == true)
+            if (_readingMode != PageOpenMode.Single)
             {
-                CheckSpread.IsChecked = false;
+                SetReadingMode(PageOpenMode.Single);
             }
 
             EnsureRotateTransform();

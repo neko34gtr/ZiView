@@ -47,9 +47,18 @@ namespace ZiView
         private CancellationTokenSource? _cts;
         private Task? _currentInferenceTask;
 
+        // InitializeComponent()の実行中は、Slider等のXAML宣言済みValue（例:TileBatchSizeSlider Value="35"）が
+        // 既定値から変わることでValueChangedが「ユーザー操作ではなく初期化として」発火し、そこから
+        // SaveConfig()が呼ばれることがある。この時点ではXAML後方に書かれた兄弟コントロール（例：
+        // OnPrefetchCountChanged由来のSaveConfig()がTileBatchSizeSliderを参照する等）がまだ接続されておらず
+        // NullReferenceException（"Config Save Error"としてログに出るだけで実害はない）の原因になっていたため、
+        // InitializeComponent()完了までの間はSaveConfig()を無視するガードを設ける。
+        private bool _isInitializingUi = true;
+
         public MainWindow(string[]? args = null)
         {
             InitializeComponent();
+            _isInitializingUi = false;
 
             // ログ出力先（カスタム指定）を反映できるよう、先に設定を読み込んでからログ基盤を初期化する
             LoadConfig();
@@ -204,13 +213,15 @@ namespace ZiView
 
         private void SaveConfig()
         {
+            if (_isInitializingUi) return; // XAML解析中（InitializeComponent中）の初期値セットによる誤発火を無視
             try
             {
                 _config.WindowLeft = this.Left;
                 _config.WindowTop = this.Top;
                 _config.WindowWidth = this.ActualWidth;
                 _config.WindowHeight = this.ActualHeight;
-                _config.CheckSpread = CheckSpread.IsChecked ?? true;
+                //_config.CheckSpread = CheckSpread.IsChecked ?? true;
+                _config.CheckSpread = ReadingModeControl.Mode == PageOpenMode.RightOpen;
                 _config.CheckAutoDetect = CheckAutoDetect.IsChecked ?? false;
                 _config.CheckPrefetch = CheckPrefetch.IsChecked ?? true;
                 _config.PrefetchPageCount = (int)PrefetchCountSlider.Value;
@@ -259,7 +270,15 @@ namespace ZiView
 
         private void ApplyConfigToUi()
         {
-            CheckSpread.IsChecked = _config.CheckSpread;
+            //CheckSpread.IsChecked = _config.CheckSpread;
+            //ReadingModeControl.Mode = _config.CheckSpread ? PageOpenMode.RightOpen : PageOpenMode.Single;
+            // 起動時の初期設定反映では、RefreshDisplay（再描画）を伴うイベントハンドラを直接呼ばず、
+            // 変数とUIコントロールの見た目（Mode）の同期だけに留める
+            _readingMode = _config.CheckSpread ? PageOpenMode.RightOpen : PageOpenMode.Single;
+            if (ReadingModeControl != null)
+            {
+                ReadingModeControl.Mode = _readingMode;
+            }
             CheckAutoDetect.IsChecked = _config.CheckAutoDetect;
             CheckPrefetch.IsChecked = _config.CheckPrefetch;
             SplitSlider.Value = _config.SplitSliderValue;

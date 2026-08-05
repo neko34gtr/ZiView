@@ -210,11 +210,15 @@ namespace ZiView
                     _currentCombinedUpscaled = cached.Upscaled;
                     isSpread = cached.IsSpread;
 
-                    _currentSpreadLeftWidth = isSpread ? cached.LeftWidth : 0;
-                    _currentSpreadRightKey = _imageList[index];
-                    _currentSpreadLeftKey = (isSpread && index + 1 < _imageList.Count) ? _imageList[index + 1] : null;
+                    bool hasNextCached = index + 1 < _imageList.Count;
+                    bool isLeftOpenCached = _readingMode == PageOpenMode.LeftOpen;
+                    _currentSpreadLeftWidth = (isSpread && hasNextCached) ? cached.LeftWidth : 0;
+                    _currentSpreadLeftKey = (isSpread && hasNextCached) ? (isLeftOpenCached ? _imageList[index] : _imageList[index + 1]) : null;
+                    _currentSpreadRightKey = (isSpread && hasNextCached) ? (isLeftOpenCached ? _imageList[index + 1] : _imageList[index]) : _imageList[index];
 
-                    PageText.Text = isSpread ? $"P.{index + 2}-{index + 1} / {_imageList.Count}" : $"P.{index + 1} / {_imageList.Count}";
+                    int leftPageNumCached = isLeftOpenCached ? index + 1 : index + 2;
+                    int rightPageNumCached = isLeftOpenCached ? index + 2 : index + 1;
+                    PageText.Text = isSpread ? $"P.{leftPageNumCached}-{rightPageNumCached} / {_imageList.Count}" : $"P.{index + 1} / {_imageList.Count}";
                     if ((int)PageSlider.Value != index)
                     {
                         _isUpdatingPageSliderInternal = true;
@@ -231,21 +235,24 @@ namespace ZiView
                     _currentCombinedUpscaled?.Dispose();
                     _currentCombinedUpscaled = null;
 
-                    bool spreadEnabled = CheckSpread.IsChecked == true;
                     bool autoDetectEnabled = CheckAutoDetect.IsChecked == true;
 
                     // 画像デコード（ファイルI/O・展開）はUIスレッドをブロックしないようバックグラウンドで実行する
-                    var (combined, spread, leftWidth) = await Task.Run(() => DecodeCombinedPage(index, spreadEnabled, autoDetectEnabled), token);
+                    var (combined, spread, leftWidth) = await Task.Run(() => DecodeCombinedPage(index, _readingMode, autoDetectEnabled), token);
                     if (token.IsCancellationRequested) { combined.Dispose(); return; }
 
                     _currentCombinedOriginal = combined;
                     isSpread = spread;
 
-                    _currentSpreadLeftWidth = isSpread ? leftWidth : 0;
-                    _currentSpreadRightKey = _imageList[index];
-                    _currentSpreadLeftKey = (isSpread && index + 1 < _imageList.Count) ? _imageList[index + 1] : null;
+                    bool hasNextFresh = index + 1 < _imageList.Count;
+                    bool isLeftOpenFresh = _readingMode == PageOpenMode.LeftOpen;
+                    _currentSpreadLeftWidth = (isSpread && hasNextFresh) ? leftWidth : 0;
+                    _currentSpreadLeftKey = (isSpread && hasNextFresh) ? (isLeftOpenFresh ? _imageList[index] : _imageList[index + 1]) : null;
+                    _currentSpreadRightKey = (isSpread && hasNextFresh) ? (isLeftOpenFresh ? _imageList[index + 1] : _imageList[index]) : _imageList[index];
 
-                    PageText.Text = isSpread ? $"P.{index + 2}-{index + 1} / {_imageList.Count}" : $"P.{index + 1} / {_imageList.Count}";
+                    int leftPageNumFresh = isLeftOpenFresh ? index + 1 : index + 2;
+                    int rightPageNumFresh = isLeftOpenFresh ? index + 2 : index + 1;
+                    PageText.Text = isSpread ? $"P.{leftPageNumFresh}-{rightPageNumFresh} / {_imageList.Count}" : $"P.{index + 1} / {_imageList.Count}";
 
                     if ((int)PageSlider.Value != index)
                     {
@@ -337,7 +344,7 @@ namespace ZiView
                 // （スライダー操作中はどうせ通り過ぎるだけなので先読み自体も無駄になるため起こさない）
                 if (!sliderBusy && CheckPrefetch.IsChecked == true && !token.IsCancellationRequested)
                 {
-                    int step = (CheckSpread.IsChecked == true) ? 2 : 1;
+                    int step = (_readingMode != PageOpenMode.Single) ? 2 : 1;
                     int count = Math.Clamp(_config.PrefetchPageCount, 1, 5);
                     _prefetchCts = new CancellationTokenSource();
                     _prefetchTask = PrefetchAheadAsync(index + step, step, count, _prefetchCts.Token);
@@ -353,20 +360,45 @@ namespace ZiView
         /// <summary>
         /// 指定ページの画像をデコードし（必要なら見開き合成した上で）返す。
         /// ファイルI/Oやアーカイブ展開を伴うため、呼び出し側はTask.Run等でUIスレッド外から呼ぶこと。
-        /// spreadEnabled/autoDetectEnabledはUI要素へアクセスせずに済むよう、呼び出し元でUIスレッド上から読み取って渡す。
+        /// mode/autoDetectEnabledはUI要素へアクセスせずに済むよう、呼び出し元でUIスレッド上から読み取って渡す。
+        /// modeがRightOpen（右開き＝従来のマンガ方式）なら現在ページ(index)を右、次ページ(index+1)を左に、
+        /// LeftOpen（左開き＝洋書方式）なら現在ページを左、次ページを右に配置する。
         /// LeftWidthは見開き合成時の左ページの幅（＝合成画像内での左右の境界X座標）。非見開き時は0。
-        /// 見開き時の片側ページ位置微調整機能（Input.cs側）が、合成後のビットマップ上でどこからどこまでが
-        /// 左ページ/右ページかを判定するために使う。
+        /// 見開き時の片側ページ位置微調整機能（MainWindow.PageOffset.cs）が、合成後のビットマップ上で
+        /// どこからどこまでが左ページ/右ページかを判定するために使う。
         /// </summary>
-        private (Mat Combined, bool IsSpread, int LeftWidth) DecodeCombinedPage(int index, bool spreadEnabled, bool autoDetectEnabled)
+        private (Mat Combined, bool IsSpread, int LeftWidth) DecodeCombinedPage(int index, PageOpenMode mode, bool autoDetectEnabled)
         {
-            Mat pRight = LoadMat(_imageList[index]);
-            bool isAutoSingle = (autoDetectEnabled && pRight.Height > 0 && (double)pRight.Width / pRight.Height > 1.1);
-            bool isSpread = (spreadEnabled && !isAutoSingle);
+            Mat pCurrent = LoadMat(_imageList[index]);
+            bool isAutoSingle = (autoDetectEnabled && pCurrent.Height > 0 && (double)pCurrent.Width / pCurrent.Height > 1.1);
+            bool isSpread = (mode != PageOpenMode.Single && !isAutoSingle);
 
-            Mat? pLeft = (isSpread && index + 1 < _imageList.Count) ? LoadMat(_imageList[index + 1]) : null;
-            int leftWidth = pLeft?.Width ?? 0;
-            Mat combined = CombineMats(pRight, pLeft);
+            Mat? pOther = (isSpread && index + 1 < _imageList.Count) ? LoadMat(_imageList[index + 1]) : null;
+
+            if (pOther == null)
+            {
+                // ペア相手がいない（設定上は見開きでもアーカイブ最終ページ等）場合は単ページのまま返す
+                return (pCurrent, isSpread, 0);
+            }
+
+            Mat combined;
+            int leftWidth;
+
+            // 重要: 幅は必ずCombineMats呼び出しより前に取得すること。CombineMatsは内部でr/l両方を
+            // Disposeするため、呼び出し後にpCurrent/pOther.Widthへアクセスするとuse-after-disposeとなり、
+            // OpenCvSharpのMat.Widthはネイティブポインタを直接参照するため、.NET例外にならず
+            // アプリごと無言でクラッシュする（実際に発生していた不具合）。
+            if (mode == PageOpenMode.LeftOpen)
+            {
+                leftWidth = pCurrent.Width;
+                combined = CombineMats(pOther, pCurrent); // CombineMats(r, l): rを右、lを左に配置
+            }
+            else
+            {
+                leftWidth = pOther.Width;
+                combined = CombineMats(pCurrent, pOther);
+            }
+
             return (combined, isSpread, leftWidth);
         }
 
@@ -397,8 +429,8 @@ namespace ZiView
             if (index < 0 || index >= _imageList.Count) return;
             if (_pageCache.ContainsKey(index)) return;
 
-            // UIスレッド上にいる間（最初のawait前）にチェックボックスの状態を読み取っておく
-            bool spreadEnabled = CheckSpread.IsChecked == true;
+            // UIスレッド上にいる間（最初のawait前）に現在の開き方向・自動判定設定を読み取っておく
+            PageOpenMode mode = _readingMode;
             bool autoDetectEnabled = CheckAutoDetect.IsChecked == true;
             bool aiEnabled = _config.EnableAiInference && _onnxSession != null && _inputName != null;
 
@@ -406,7 +438,7 @@ namespace ZiView
             Mat? upscaled = null;
             try
             {
-                var (decoded, isSpread, leftWidth) = await Task.Run(() => DecodeCombinedPage(index, spreadEnabled, autoDetectEnabled), token);
+                var (decoded, isSpread, leftWidth) = await Task.Run(() => DecodeCombinedPage(index, mode, autoDetectEnabled), token);
                 combined = decoded;
                 token.ThrowIfCancellationRequested();
 
@@ -678,7 +710,7 @@ namespace ZiView
 
         private void MovePage(int dir)
         {
-            int step = (CheckSpread.IsChecked == true) ? 2 : 1;
+            int step = (_readingMode != PageOpenMode.Single) ? 2 : 1;
             int next = (int)PageSlider.Value + (dir * step);
             if (next < 0) LoadNextArchive(-1);
             else if (next > PageSlider.Maximum) LoadNextArchive(1);
