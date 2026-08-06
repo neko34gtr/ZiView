@@ -57,6 +57,10 @@ namespace ZiView
             {
                 this.IsEnabled = true;
                 overlay.Close();
+
+                // オーバーレイ破棄によりOSのフォーカスが外部アプリへ逃げるのを防ぐ
+                this.Activate();
+                this.Focus();
             }
         }
 
