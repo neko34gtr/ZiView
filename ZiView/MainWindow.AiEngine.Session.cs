@@ -309,6 +309,9 @@ namespace ZiView
                     ["trt_engine_cache_enable"] = "1",
                     ["trt_engine_cache_path"] = cacheDir,
                     ["trt_timing_cache_enable"] = "1",
+
+                    // ワークスペース領域の上限を 1GB (1073741824 bytes) や 512MB に絞る 1GBに絞ってみる
+                    ["trt_max_workspace_size"] = "1073741824",
                 });
                 options.AppendExecutionProvider_Tensorrt(trtOptions);
                 WriteLog($"TensorRT engine cache enabled: {cacheDir}");
@@ -335,6 +338,44 @@ namespace ZiView
         private void AppendOpenVino(SessionOptions options)
         {
             options.AppendExecutionProvider_OpenVINO("CPU");
+        }
+
+        /// <summary>
+        /// 現在の推論セッションで実際に使用されているアクティブなVRAM量（MB）の概算値を返す。
+        /// </summary>
+        public double GetActiveVramUsageMb()
+        {
+            if (_onnxSession == null) return 0.0;
+
+            try
+            {
+                // 1. モデルファイル自体のサイズ（VRAM上にロードされている重み）
+                double modelWeightMb = 0.0;
+                string modelPath = Path.Combine(GetModelDirectory(_config.ModelFolder), _config.SelectedModel);
+                if (File.Exists(modelPath))
+                {
+                    modelWeightMb = new FileInfo(modelPath).Length / (1024.0 * 1024.0);
+                }
+
+                // 2. 入出力テンソルバッファの計算
+                int elementSize = _isFp16Model ? 2 : 4;
+                int tileSize = _fixedInputSize ?? GetTileSizeForModel(_config.SelectedModel);
+                int batchSize = _config.EnableTileBatching ? EffectiveTileBatchSize : 1;
+
+                // 入力: [Batch, 3, TileSize, TileSize]
+                long inputBytes = (long)batchSize * 3 * tileSize * tileSize * elementSize;
+                // 出力: 4倍超解像モデルとして [Batch, 3, TileSize*4, TileSize*4]
+                long outputBytes = (long)batchSize * 3 * (tileSize * 4) * (tileSize * 4) * elementSize;
+
+                double tensorMb = (inputBytes + outputBytes) / (1024.0 * 1024.0);
+
+                // 重み + テンソル + 中間特徴マップ作業領域（テンソルの約3倍と仮定）
+                return modelWeightMb + (tensorMb * 3.0);
+            }
+            catch
+            {
+                return 0.0;
+            }
         }
     }
 }

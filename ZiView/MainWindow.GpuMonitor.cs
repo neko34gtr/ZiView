@@ -92,9 +92,11 @@ namespace ZiView
                     if (nvmlDeviceGetUtilizationRates(_nvmlDevice, out var util) == 0 &&
                         nvmlDeviceGetMemoryInfo(_nvmlDevice, out var mem) == 0)
                     {
-                        double usedMb = (double)mem.used / (1024 * 1024);
-                        double totalMb = (double)mem.total / (1024 * 1024);
-                        GpuText.Text = $"GPU: {util.gpu}% (VRAM: {usedMb:F0} / {totalMb:F0} MB)";
+                        double poolMb = (double)mem.used / (1024 * 1024);     // NVMLが返す確保済みVRAM
+                        double totalMb = (double)mem.total / (1024 * 1024);   // VRAM全体
+                        double activeMb = GetActiveVramUsageMb();             // アクティブVRAM算出
+
+                        GpuText.Text = $"GPU: {util.gpu}% (Active: {activeMb:F0} MB / Pool: {poolMb:F0} MB)";
                     }
                     else
                     {
