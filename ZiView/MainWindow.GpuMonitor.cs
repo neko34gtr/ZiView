@@ -96,7 +96,11 @@ namespace ZiView
                         double totalMb = (double)mem.total / (1024 * 1024);   // VRAM全体
                         double activeMb = GetActiveVramUsageMb();             // アクティブVRAM算出
 
-                        GpuText.Text = $"GPU: {util.gpu}% (Active: {activeMb:F0} MB / Pool: {poolMb:F0} MB)";
+                        // サイドバー幅での文字切れを防ぐため、1024MB以上はGB表記にし、2行に分割
+                        string activeStr = activeMb >= 1024 ? $"{activeMb / 1024.0:F1}GB" : $"{activeMb:F0}MB";
+                        string poolStr = poolMb >= 1024 ? $"{poolMb / 1024.0:F1}GB" : $"{poolMb:F0}MB";
+
+                        GpuText.Text = $"GPU: {util.gpu}%\nVRAM: {activeStr} (Pool: {poolStr})";
                     }
                     else
                     {
