@@ -284,6 +284,7 @@ namespace ZiView
                             await InitializeAiWithOverlayAsync(_config.SelectedModel);
                         }
 
+                        // AI推論実行部を、縮小処理を通してから渡すように改修予定
                         if (_onnxSession != null && _inputName != null)
                         {
                             StatusText.Text = $"Processing... ({_activeEngineMode})";
@@ -292,7 +293,13 @@ namespace ZiView
                             var swTotal = System.Diagnostics.Stopwatch.StartNew();
                             try
                             {
-                                var inferenceTask = Task.Run(() => PerformAiTiled(_currentCombinedOriginal, token, progress), token);
+                                var inferenceTask = Task.Run(() =>
+                                {
+                                    // 巨大画像によるVRAMパンクを防ぐため、長辺3840px上限で推論用Matを作成
+                                    using var inputForAi = PrepareMatForInference(_currentCombinedOriginal, 3840);
+                                    return PerformAiTiled(inputForAi, token, progress);
+                                }, token);
+
                                 _currentInferenceTask = inferenceTask;
 
                                 // 30秒ごとに「まだ動いているか」をログへ出し、真のハングと単なる低速処理を切り分けやすくする
@@ -446,7 +453,12 @@ namespace ZiView
 
                 if (aiEnabled)
                 {
-                    upscaled = await Task.Run(() => PerformAiTiled(combined, token), token);
+                    upscaled = await Task.Run(() =>
+                    {
+                        // 巨大画像によるVRAMパンクを防ぐため、長辺3840px上限で推論用Matを作成
+                        using var inputForAi = PrepareMatForInference(combined, 3840);
+                        return PerformAiTiled(inputForAi, token);
+                    }, token);
                     token.ThrowIfCancellationRequested();
                 }
 

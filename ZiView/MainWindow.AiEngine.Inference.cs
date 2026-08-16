@@ -349,6 +349,30 @@ namespace ZiView
         }
 
         /// <summary>
+        /// AI推論時のVRAM/RAM暴走・メモリ不足を防ぐため、
+        /// 長辺が指定サイズ（デフォルト3840px）を超える場合はアスペクト比を維持して縮小する。
+        /// </summary>
+        private Mat PrepareMatForInference(Mat src, int maxLongSide = 3840)
+        {
+            if (src == null || src.Empty()) return new Mat();
+
+            int maxSide = Math.Max(src.Width, src.Height);
+            if (maxSide <= maxLongSide)
+            {
+                return src.Clone();
+            }
+
+            double scale = (double)maxLongSide / maxSide;
+            int newWidth = (int)(src.Width * scale);
+            int newHeight = (int)(src.Height * scale);
+
+            Mat resized = new Mat();
+            Cv2.Resize(src, resized, new OpenCvSharp.Size(newWidth, newHeight), 0, 0, InterpolationFlags.Area);
+            WriteLog($"[AI] Input image downsampled for inference: {src.Width}x{src.Height} -> {newWidth}x{newHeight}");
+            return resized;
+        }
+
+        /// <summary>
         /// 同一サイズにパディング済みのタイル群を1つのバッチテンソル[N,3,H,W]にまとめ、
         /// Session.Runを1回だけ呼び出す。カーネル起動オーバーヘッドをタイル数→バッチ数に削減する。
         /// TensorRT利用時は、エンジン構築時のOptimization ProfileがDynamic Batch
