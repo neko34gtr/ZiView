@@ -10,6 +10,7 @@ using System.Windows;
 
 using OpenCvSharp;
 using OpenCvSharp.WpfExtensions;
+using ImageMagick;
 
 namespace ZiView
 {
@@ -163,7 +164,8 @@ namespace ZiView
             f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
             f.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
             f.EndsWith(".webp", StringComparison.OrdinalIgnoreCase) ||
-            f.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase));
+            f.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+            f.EndsWith(".avif", StringComparison.OrdinalIgnoreCase));
 
         private void RefreshDisplay() => DisplayPage((int)PageSlider.Value);
 
@@ -475,12 +477,12 @@ namespace ZiView
 
         private Mat LoadMat(string key)
         {
-            if (Directory.Exists(_currentSourcePath)) return Cv2.ImRead(key);
+            if (Directory.Exists(_currentSourcePath)) return LoadMatFromPath(key);
 
             // rar/7zは起動時に実ファイルとして全展開済みのため、keyは既にディスク上の実パスになっている
             if (File.Exists(key) && IsImageFile(key))
             {
-                return Cv2.ImRead(key);
+                return LoadMatFromPath(key);
             }
 
             string ext = Path.GetExtension(_currentSourcePath ?? "").ToLower(CultureInfo.InvariantCulture);
@@ -493,12 +495,43 @@ namespace ZiView
                     using (MemoryStream ms = new MemoryStream())
                     {
                         entryStream.CopyTo(ms);
-                        return Cv2.ImDecode(ms.ToArray(), ImreadModes.Color);
+                        return DecodeImageBytes(ms.ToArray(), key);
                     }
                 }
             }
 
             return new Mat();
+        }
+
+        /// <summary>
+        /// ディスク上の実ファイルパスからMatを読み込む。AVIFのみOpenCVがデコード非対応のため
+        /// Magick.NET経由でバイト列化してからCv2.ImDecodeへ渡す。それ以外は従来通りCv2.ImReadを使う。
+        /// </summary>
+        private Mat LoadMatFromPath(string path)
+        {
+            string ext = Path.GetExtension(path).ToLower(CultureInfo.InvariantCulture);
+            if (ext == ".avif")
+            {
+                return DecodeImageBytes(File.ReadAllBytes(path), path);
+            }
+            return Cv2.ImRead(path);
+        }
+
+        /// <summary>
+        /// AVIFはOpenCVが未対応のためMagick.NETでデコードしBMPバイト列へ変換してからCv2.ImDecodeへ渡す。
+        /// ImreadModes.Colorで強制的に3ch BGRへ揃えるため、アルファの有無に関わらず他形式と同じ扱いになる。
+        /// それ以外の拡張子は従来通りCv2.ImDecodeへそのまま渡す。
+        /// </summary>
+        private Mat DecodeImageBytes(byte[] bytes, string keyOrPath)
+        {
+            string ext = Path.GetExtension(keyOrPath).ToLower(CultureInfo.InvariantCulture);
+            if (ext == ".avif")
+            {
+                using var magick = new MagickImage(bytes);
+                byte[] bmpBytes = magick.ToByteArray(MagickFormat.Bmp);
+                return Cv2.ImDecode(bmpBytes, ImreadModes.Color);
+            }
+            return Cv2.ImDecode(bytes, ImreadModes.Color);
         }
 
         /// <summary>
