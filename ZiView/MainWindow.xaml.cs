@@ -241,15 +241,44 @@ namespace ZiView
             catch (Exception ex) { WriteLog($"Config Save Error: {ex.Message}"); }
         }
 
-        private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        // 後始末を完了させてから自分でCloseし直すためのフラグ（二重実行防止）
+        private bool _isClosingConfirmed = false;
+
+        private async void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            if (_isClosingConfirmed) return; // 後始末後の2回目のClose()呼び出しはそのまま閉じさせる
+
+            e.Cancel = true; // 実行中のAI推論を安全に止めるまで、一旦ウィンドウは閉じさせない
+
             SaveConfig();
             WriteLog("Cleaning up resources.");
+            var swClose = System.Diagnostics.Stopwatch.StartNew();
+
+            // 実行中のAI推論を止め、_onnxSessionへのアクセスが完全に終わるまで待ってからDisposeする。
+            // ApplyModelSelectionAsyncと同じパターン。ONNX RuntimeのSessionはRun()実行中に
+            // Dispose()すると内部でその完了を待たされるため、ここで先に止めておかないと
+            // 終了処理がAI推論の残りタイル分だけ丸ごと遅延する
+            _cts?.Cancel();
+            var runningTask = _currentInferenceTask;
+            if (runningTask != null)
+            {
+                try { await runningTask; } catch { /* キャンセル/実行時例外は無視 */ }
+            }
+            WriteLog($"[Shutdown] Pending inference drained at {swClose.Elapsed.TotalMilliseconds:F0}ms.");　// トレース1
+
             // RAMDISK運用時のみ、正常終了時にSSD側へtrt_cacheを退避する
             BackupTrtCacheToSsd();
+            WriteLog($"[Shutdown] BackupTrtCacheToSsd done at {swClose.Elapsed.TotalMilliseconds:F0}ms.");　// トレース2
+
             ClearPageCache();
+            WriteLog($"[Shutdown] ClearPageCache done at {swClose.Elapsed.TotalMilliseconds:F0}ms.");　// トレース3
+
             CloseOpenZip();
+            WriteLog($"[Shutdown] CloseOpenZip done at {swClose.Elapsed.TotalMilliseconds:F0}ms.");　// トレース4
+
             _onnxSession?.Dispose();
+            WriteLog($"[Shutdown] _onnxSession.Dispose done at {swClose.Elapsed.TotalMilliseconds:F0}ms.");　// トレース5
+
             _currentCombinedOriginal?.Dispose();
             _currentCombinedUpscaled?.Dispose();
 
@@ -266,6 +295,9 @@ namespace ZiView
             _logChannel.Writer.TryComplete();
             try { _logWriterTask?.Wait(500); } catch { }
             try { _logWriter?.Flush(); _logWriter?.Dispose(); } catch { }
+
+            _isClosingConfirmed = true;
+            Close();
         }
 
         private void ApplyConfigToUi()

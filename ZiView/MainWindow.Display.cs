@@ -284,7 +284,7 @@ namespace ZiView
                             await InitializeAiWithOverlayAsync(_config.SelectedModel);
                         }
 
-                        // AI推論実行部を、縮小処理を通してから渡すように改修予定
+                        // AI推論実行部を、縮小処理を通してから渡す
                         if (_onnxSession != null && _inputName != null)
                         {
                             StatusText.Text = $"Processing... ({_activeEngineMode})";
