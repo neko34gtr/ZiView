@@ -33,6 +33,11 @@ namespace ZiView
         /// </summary>
         private async void Application_Startup(object sender, StartupEventArgs e)
         {
+            // ここから追加（AVIFデコード失敗時にImageMagickが残す一時ファイルの置き場所を固定し、
+            // 前回セッションの残骸を起動時に掃除する。二重起動時の後続プロセスでも無害なため、
+            // ミューテックス判定より前で実行して問題ない）
+            ZiView.MainWindow.InitializeMagickTempDirectory();
+
             // ミューテックスを生成し、所有権の取得を試みる
             _mutex = new Mutex(true, MutexName, out bool isNewInstance);
 

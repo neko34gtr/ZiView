@@ -55,7 +55,41 @@ namespace ZiView
 
         // 現在のソースがzipの場合、ページ送りのたびに開き直さずこのハンドルを使い回す
         private ZipArchive? _openZipArchive;
+        private readonly object _zipReadLock = new object();
         private FileStream? _openZipStream;
+
+        // AVIFデコード失敗時にImageMagickがネイティブ側へ残す一時ファイル([TEMP]\magick-*)を
+        // 自前管理のフォルダに閉じ込め、起動時に前回セッションの残骸をまとめて掃除できるようにする。
+        private static readonly string _magickTempDir = Path.Combine(Path.GetTempPath(), "ZiView", "magick-cache");
+
+        /// <summary>
+        /// アプリ起動時に一度だけ呼ぶ。ImageMagickの一時ディレクトリをOS既定から
+        /// _magickTempDirへ切り替え、前回セッションが残した孤児ファイルを削除する。
+        /// AVIFデコード（MagickImageのコンストラクタ）が例外を投げた場合、usingでの
+        /// Disposeが効かず一時ファイルが残り続けることがあるための対策。
+        /// </summary>
+        internal static void InitializeMagickTempDirectory()
+        {
+            try
+            {
+                Directory.CreateDirectory(_magickTempDir);
+                MagickNET.SetTempDirectory(_magickTempDir);
+            }
+            catch
+            {
+                // 失敗してもOS既定の一時フォルダが使われるだけなので致命的ではない
+            }
+
+            try
+            {
+                foreach (var f in Directory.EnumerateFiles(_magickTempDir))
+                {
+                    try { File.Delete(f); }
+                    catch { /* 前回セッションがまだファイルをロックしている等は次回に回す */ }
+                }
+            }
+            catch { }
+        }
 
         /// <summary>
         /// 開いたままのzipハンドルを解放する。ソース切替時・終了時に必ず呼び出すこと。
@@ -74,6 +108,22 @@ namespace ZiView
             WriteLog($"Loading source tree: {path}");
 
             _cts?.Cancel();
+
+            _prefetchCts?.Cancel(); // ClearPageCache内でも呼ばれるが、下のawaitより前に確実に要求しておく
+
+            //（旧ソースの_openZipArchiveをDisposeする前に、それを参照している
+            // かもしれないバックグラウンドタスク（推論・先読み）の完了を待つ。DisplayPageと同じ理由）
+            var priorTask = _currentInferenceTask;
+            if (priorTask != null)
+            {
+                try { await priorTask; } catch { /* キャンセル/実行時例外は無視 */ }
+            }
+            var priorPrefetch = _prefetchTask;
+            if (priorPrefetch != null)
+            {
+                try { await priorPrefetch; } catch { /* キャンセル/実行時例外は無視 */ }
+            }
+
             ClearPageCache();
             CloseOpenZip();
 
@@ -500,14 +550,19 @@ namespace ZiView
             string ext = Path.GetExtension(_currentSourcePath ?? "").ToLower(CultureInfo.InvariantCulture);
             if (ext == ".zip" && _openZipArchive != null)
             {
-                ZipArchiveEntry? entry = _openZipArchive.GetEntry(key);
-                if (entry != null)
+                // ZipArchiveは複数エントリの同時読み取りに非対応のため、
+                // 先読みスレッドと表示スレッドが同時にここへ来ても直列化する）
+                lock (_zipReadLock)
                 {
-                    using (Stream entryStream = entry.Open())
-                    using (MemoryStream ms = new MemoryStream())
+                    ZipArchiveEntry? entry = _openZipArchive.GetEntry(key);
+                    if (entry != null)
                     {
-                        entryStream.CopyTo(ms);
-                        return DecodeImageBytes(ms.ToArray(), key);
+                        using (Stream entryStream = entry.Open())
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            entryStream.CopyTo(ms);
+                            return DecodeImageBytes(ms.ToArray(), key);
+                        }
                     }
                 }
             }

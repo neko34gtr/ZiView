@@ -250,6 +250,10 @@ namespace ZiView
 
             e.Cancel = true; // 実行中のAI推論を安全に止めるまで、一旦ウィンドウは閉じさせない
 
+            // 後始末中もウィンドウが「応答なし」表示にならないよう、
+            // ユーザーからは即座に消えたように見せる。後始末自体はこの裏で継続する）
+            Hide();
+
             SaveConfig();
             WriteLog("Cleaning up resources.");
             var swClose = System.Diagnostics.Stopwatch.StartNew();
@@ -286,18 +290,37 @@ namespace ZiView
             {
                 if (Directory.Exists(_tempExtractDir))
                 {
+                    var fileCount = Directory.EnumerateFiles(_tempExtractDir, "*", SearchOption.AllDirectories).Count();
+                    WriteLog($"[Shutdown] Deleting temp extract dir ({fileCount} files) at {swClose.Elapsed.TotalMilliseconds:F0}ms..."); // トレース6
+
                     Directory.Delete(_tempExtractDir, true);
+
+                    WriteLog($"[Shutdown] Temp extract dir deleted at {swClose.Elapsed.TotalMilliseconds:F0}ms."); // トレース7
                 }
             }
-            catch { }
+            catch (Exception exDel)
+            {
+                WriteLog($"[Shutdown] Temp extract dir delete failed at {swClose.Elapsed.TotalMilliseconds:F0}ms: {exDel.Message}"); // トレース8
+            }
 
             // ログキューを締め切り、バックグラウンドタスクが残りを書き切るのを少し待ってから閉じる
             _logChannel.Writer.TryComplete();
             try { _logWriterTask?.Wait(500); } catch { }
             try { _logWriter?.Flush(); _logWriter?.Dispose(); } catch { }
 
-            _isClosingConfirmed = true;
-            Close();
+            try
+            {
+                File.AppendAllText(_logPath,
+                    $"[{DateTime.Now:HH:mm:ss}] [Shutdown] Log flush done at {swClose.Elapsed.TotalMilliseconds:F0}ms. Calling Close().{Environment.NewLine}"); // トレース9
+            }
+            catch { }
+            // _isClosingConfirmed = true;
+            // Close();
+            // Close()経由の正規終了フローだと、この後CUDA/TensorRTのネイティブ側コンテキスト解放を
+            // OSがブロッキングで待つため体感20〜30秒「応答なし」になる。自前の後始末は上ですべて
+            // 完了済み（ログ・キャッシュ退避も終わっている）ので、ここから先はOSに丸ごと回収させる
+            // 前提でプロセスを即終了する。
+            Environment.Exit(0);
         }
 
         private void ApplyConfigToUi()
