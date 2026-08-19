@@ -85,12 +85,18 @@ namespace ZiView
             this.Loaded += async (s, e) =>
             {
                 ScanOnnxModels();
-                // PC再起動等でRAMDISKが消えていた場合、SSD側の退避キャッシュから復元する
-                // （TensorRT再ビルドの数十秒コストを避けるため。RAMDISK運用でない場合は自動的に何もしない）
-                RestoreTrtCacheFromBackupIfNeeded();
-                // TensorRT構築・ウォームアップは重いため、オーバーレイ表示＋バックグラウンド実行にして
-                // UIスレッドの応答なし（白画面）状態を回避する
-                await InitializeAiWithOverlayAsync(_config.SelectedModel);
+
+                // AI推論が無効設定の場合、起動時のTensorRT構築・ウォームアップ自体を
+                // スキップする。有効時のみ従来通りRAMDISK復元→初期化を行う
+                if (_config.EnableAiInference)
+                {
+                    // PC再起動等でRAMDISKが消えていた場合、SSD側の退避キャッシュから復元する
+                    // （TensorRT再ビルドの数十秒コストを避けるため。RAMDISK運用でない場合は自動的に何もしない）
+                    RestoreTrtCacheFromBackupIfNeeded();
+                    // TensorRT構築・ウォームアップは重いため、オーバーレイ表示＋バックグラウンド実行にして
+                    // UIスレッドの応答なし（白画面）状態を回避する
+                    await InitializeAiWithOverlayAsync(_config.SelectedModel);
+                }
                 ApplyConfigToUi();
                 if (!string.IsNullOrEmpty(_currentSourcePath))
                 {
