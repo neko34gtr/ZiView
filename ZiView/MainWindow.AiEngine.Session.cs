@@ -86,6 +86,11 @@ namespace ZiView
         {
             try
             {
+                // 既にキャッシュがあれば内部で即return（idempotent）なので、呼び出し元がLoaded/
+                // 表示時の自動再init/モデル切替/設定変更のいずれであっても、SSD退避キャッシュからの
+                // 復元漏れが起きないようにする）
+                RestoreTrtCacheFromBackupIfNeeded();
+
                 string modelPath = Path.Combine(GetModelDirectory(_config.ModelFolder), modelFileName);
                 if (!File.Exists(modelPath))
                 {
@@ -337,7 +342,7 @@ namespace ZiView
         /// </summary>
         private void AppendOpenVino(SessionOptions options)
         {
-            options.AppendExecutionProvider_OpenVINO("CPU");
+            options.AppendExecutionProvider_OpenVINO("GPU");
         }
 
         /// <summary>
