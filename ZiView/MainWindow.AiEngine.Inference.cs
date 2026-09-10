@@ -164,6 +164,19 @@ namespace ZiView
             return true;
         }
 
+        /// <summary>
+        /// _onnxSession.Run()を排他制御付きで実行する。先読みと本表示が同じセッションへ
+        /// 同時にRun()するとTensorRT実行コンテキストの競合でネイティブクラッシュしうるため、
+        /// このメソッド経由でのみRun()を呼ぶことで直列化する。
+        /// </summary>
+        private IDisposableReadOnlyCollection<DisposableNamedOnnxValue> RunOnnxSession(List<NamedOnnxValue> inputs)
+        {
+            lock (_onnxRunLock)
+            {
+                return _onnxSession!.Run(inputs);
+            }
+        }
+
         private Mat PerformAiTiled(Mat input, CancellationToken token, IProgress<(int done, int total)>? progress = null)
         {
             // 条件を満たせばタイル分割自体を回避し、画像全体を1回のRunで処理する。
@@ -456,7 +469,8 @@ namespace ZiView
                     inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_inputName ?? "input", tensor) };
                 }
 
-                using var results = _onnxSession!.Run(inputs);
+                //using var results = _onnxSession!.Run(inputs);
+                using var results = RunOnnxSession(inputs);
                 return ConvertBatchResults(results, n, useFp16);
             }
             finally
@@ -579,7 +593,8 @@ namespace ZiView
                 inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_inputName ?? "input", tensor) };
             }
 
-            using var results = _onnxSession!.Run(inputs);
+            //using var results = _onnxSession!.Run(inputs);
+            using var results = RunOnnxSession(inputs);
 
             int outH, outW;
             Mat res;

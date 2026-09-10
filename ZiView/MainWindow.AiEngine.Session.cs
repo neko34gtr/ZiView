@@ -22,6 +22,13 @@ namespace ZiView
         private bool _isFp16Model = true;
         private string _activeEngineMode = "Unknown";
 
+        // _onnxSession.Run()自体の排他制御用。先読み(Prefetch)スレッドと表示中ページのスレッドが
+        // 同じInferenceSession（同じTensorRT実行コンテキスト）に対して同時にRun()を呼ぶと、
+        // TensorRTの実行コンテキストは並行呼び出しに対して安全ではないため、.NET側で捕捉できない
+        // ネイティブクラッシュ（プロセスごと強制終了）に至ることがある。ページ送りが速いほど
+        // 先読みと本表示のタイミングが重なりやすく発生率が上がるため、Run()呼び出し区間だけを直列化する。
+        private readonly object _onnxRunLock = new object();
+
         // InitializeAiの多重同時実行を防ぐフラグ。
         // 「表示時にセッションがnullなら自動再初期化」という既存の保険ロジック（MainWindow.Display.cs）が、
         // 起動直後や名前付きパイプ経由の二重オープン等でTask.Run中のInitializeAiとほぼ同時に走ると、
