@@ -35,6 +35,10 @@ namespace ZiView
         private CancellationTokenSource? _prefetchCts;
         private Task? _prefetchTask;
 
+        // DisplayPageの再入対策。連打で呼び出しが重なった際、最新の呼び出しだけが処理を続行し、
+        // 古い呼び出しはawait明けに打ち切る（UIスレッド上でのみ読み書きするためlock不要）
+        private int _displayGeneration = 0;
+
         // 無限ループイベントを抑止するためのフラグ
         private bool _isUpdatingPageSliderInternal = false;
 
@@ -221,6 +225,8 @@ namespace ZiView
 
         private async void DisplayPage(int index)
         {
+            int myGeneration = ++_displayGeneration;
+
             _cts?.Cancel();
             _prefetchCts?.Cancel();
 
@@ -237,6 +243,10 @@ namespace ZiView
                 // 先読みタスクが_pageCacheへ書き込み中の可能性があるため、完了を待ってから続行する
                 try { await priorPrefetch; } catch { /* キャンセル/実行時例外は無視 */ }
             }
+
+            // 待機中により新しいDisplayPageが呼ばれていたら、この呼び出しは破棄する。
+            // 最新の呼び出しだけが_ctsを作って処理を続行するため、並走が1本に収束する
+            if (myGeneration != _displayGeneration) return;
 
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
