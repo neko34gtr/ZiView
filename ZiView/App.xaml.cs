@@ -28,11 +28,37 @@ namespace ZiView
         // パイプサーバーの非同期待受タスクを安全に破棄するためのトークンソース
         private CancellationTokenSource? _cts;
 
+        // 未処理の致命的例外を同期的にcrash.logへ記録する。session.logはチャンネル経由の非同期書き込みで、
+        // 異常終了時にフラッシュされず何も残らないため、別ファイルへFile.AppendAllTextで直接書く。
+        private static readonly string CrashLogPath =
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
+
+        private static void WriteCrashLog(string source, Exception? ex)
+        {
+            try
+            {
+                File.AppendAllText(CrashLogPath,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{source}] {ex?.ToString() ?? "(null)"}{Environment.NewLine}{Environment.NewLine}");
+            }
+            catch { }
+        }
+        private void RegisterGlobalExceptionLogging()
+        {
+            DispatcherUnhandledException += (s, e) => WriteCrashLog("DispatcherUnhandled", e.Exception);
+            AppDomain.CurrentDomain.UnhandledException += (s, e) => WriteCrashLog("AppDomainUnhandled", e.ExceptionObject as Exception);
+            TaskScheduler.UnobservedTaskException += (s, e) =>
+            {
+                WriteCrashLog("UnobservedTask", e.Exception);
+                e.SetObserved();
+            };
+        }
+
         /// <summary>
         /// アプリケーション起動時の初期化処理。二重起動の判定と、それに応じた分岐を行います。
         /// </summary>
         private async void Application_Startup(object sender, StartupEventArgs e)
         {
+            RegisterGlobalExceptionLogging();
             // ここから追加（AVIFデコード失敗時にImageMagickが残す一時ファイルの置き場所を固定し、
             // 前回セッションの残骸を起動時に掃除する。二重起動時の後続プロセスでも無害なため、
             // ミューテックス判定より前で実行して問題ない）

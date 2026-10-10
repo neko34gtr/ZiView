@@ -385,9 +385,13 @@ namespace ZiView
                                     // GPUコンテキストが不安定化している可能性が高いため、
                                     // 汚染されたセッションを使い回さず次回アクセス時に再構築させる
                                     WriteLog("GPU runtime error detected. Disposing session to force clean reinit on next use.");
-                                    _onnxSession?.Dispose();
-                                    _onnxSession = null;
-                                    _inputName = null;
+                                    // ここから修正（先読みスレッドがRun中に破棄してネイティブクラッシュするのを防ぐ）
+                                    lock (_onnxRunLock)
+                                    {
+                                        _onnxSession?.Dispose();
+                                        _onnxSession = null;
+                                        _inputName = null;
+                                    }
                                 }
                             }
                             finally

@@ -184,9 +184,12 @@ namespace ZiView
 
             _config.SelectedModel = modelFileName;
 
-            _onnxSession?.Dispose();
-            _onnxSession = null;
-            _inputName = null;
+            lock (_onnxRunLock)
+            {
+                _onnxSession?.Dispose();
+                _onnxSession = null;
+                _inputName = null;
+            }
 
             StatusText.Text = "Mode: Loading model...";
             await InitializeAiWithOverlayAsync(modelFileName);

@@ -173,7 +173,10 @@ namespace ZiView
         {
             lock (_onnxRunLock)
             {
-                return _onnxSession!.Run(inputs);
+                // （破棄・再初期化中ならNREではなく明確な例外にする）
+                var session = _onnxSession
+                    ?? throw new InvalidOperationException("ONNX session is not available (disposed or reinitializing).");
+                return session.Run(inputs);
             }
         }
 

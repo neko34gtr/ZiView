@@ -284,9 +284,12 @@ namespace ZiView
             WriteLog($"[Shutdown] ClearPageCache done at {swClose.Elapsed.TotalMilliseconds:F0}ms.");　// トレース3
 
             CloseOpenZip();
-            WriteLog($"[Shutdown] CloseOpenZip done at {swClose.Elapsed.TotalMilliseconds:F0}ms.");　// トレース4
+            WriteLog($"[Shutdown] CloseOpenZip done at {swClose.Elapsed.TotalMilliseconds:F0}ms."); // トレース4
 
-            _onnxSession?.Dispose();
+            lock (_onnxRunLock)
+            {
+                _onnxSession?.Dispose();
+            }
             WriteLog($"[Shutdown] _onnxSession.Dispose done at {swClose.Elapsed.TotalMilliseconds:F0}ms.");　// トレース5
 
             _currentCombinedOriginal?.Dispose();
